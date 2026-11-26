@@ -1,0 +1,18 @@
+{
+  "name": "KalaMitra - कला मित्र",
+  "short_name": "KalaMitra",
+  "description": "AI Virtual Business Manager for Bharat Artisans",
+  "start_url": "./#/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fffbeb",
+  "theme_color": "#ea580c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

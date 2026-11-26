@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-size: 16px; /* Ensuring minimum 16px font size */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    overscroll-behavior-y: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  input, textarea, select {
+    user-select: text;
+    -webkit-user-select: text;
+    font-size: 16px !important; /* Prevents auto-zoom on iOS & ensures readability */
+  }
+}
+
+/* Custom mobile card container */
+.mobile-container {
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  min-height: 100vh;
+}
