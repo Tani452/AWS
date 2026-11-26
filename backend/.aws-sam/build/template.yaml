@@ -1,0 +1,499 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: KalaMitra - AI Virtual Business Manager for Bharat Artisans (AWS ap-southeast-2)
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 25
+    MemorySize: 512
+    Architectures:
+    - x86_64
+    Environment:
+      Variables:
+        AWS_REGION_NAME: ap-southeast-2
+        PRODUCTS_TABLE:
+          Ref: ProductsTable
+        ENQUIRIES_TABLE:
+          Ref: EnquiriesTable
+        USAGE_TABLE:
+          Ref: UsageTable
+        REFERENCE_PRICES_TABLE:
+          Ref: ReferencePricesTable
+        MEDIA_BUCKET:
+          Ref: MediaBucket
+Resources:
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          AllowedOrigins:
+          - '*'
+          MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteTmpObjectsAfterOneDay
+          Status: Enabled
+          Prefix: tmp/
+          ExpirationInDays: 1
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: ownerId
+        AttributeType: S
+      - AttributeName: productId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: ownerId
+        KeyType: HASH
+      - AttributeName: productId
+        KeyType: RANGE
+  EnquiriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: shopId
+        AttributeType: S
+      - AttributeName: enquiryId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: shopId
+        KeyType: HASH
+      - AttributeName: enquiryId
+        KeyType: RANGE
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: ownerId
+        AttributeType: S
+      - AttributeName: date
+        AttributeType: S
+      KeySchema:
+      - AttributeName: ownerId
+        KeyType: HASH
+      - AttributeName: date
+        KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+  ReferencePricesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: category
+        AttributeType: S
+      KeySchema:
+      - AttributeName: category
+        KeyType: HASH
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: kalamitra-user-pool
+      UsernameAttributes:
+      - email
+      AutoVerifiedAttributes:
+      - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: kalamitra-web-client
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_SRP_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      - ALLOW_USER_PASSWORD_AUTH
+  KalaMitraHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowMethods:
+        - GET
+        - POST
+        - DELETE
+        - OPTIONS
+        AllowHeaders:
+        - Authorization
+        - Content-Type
+        - X-Requested-With
+        - Accept
+        - Origin
+        AllowOrigins:
+        - '*'
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              audience:
+              - Ref: UserPoolClient
+              issuer:
+                Fn::Sub: https://cognito-idp.ap-southeast-2.amazonaws.com/${UserPool}
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+  UploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: UploadUrlFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - s3:PutObject
+          - s3:GetObject
+          Resource:
+            Fn::Sub: ${MediaBucket.Arn}/*
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        UploadUrlApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /upload-url
+            Method: POST
+    Metadata:
+      SamResourceId: UploadUrlFunction
+  EnhanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: EnhanceFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          Resource:
+            Fn::Sub: ${MediaBucket.Arn}/*
+        - Effect: Allow
+          Action:
+          - rekognition:DetectLabels
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        EnhanceApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /enhance
+            Method: POST
+    Metadata:
+      SamResourceId: EnhanceFunction
+  CatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CatalogFunction
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          AI_PROVIDER: gemini
+          GEMINI_KEY_PARAM: /kalamitra/gemini-key
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          Resource:
+            Fn::Sub: arn:aws:ssm:ap-southeast-2:${AWS::AccountId}:parameter/kalamitra/gemini-key
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        CatalogApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /catalog
+            Method: POST
+    Metadata:
+      SamResourceId: CatalogFunction
+  PriceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: PriceFunction
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          AI_PROVIDER: gemini
+          GEMINI_KEY_PARAM: /kalamitra/gemini-key
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          Resource:
+            Fn::Sub: arn:aws:ssm:ap-southeast-2:${AWS::AccountId}:parameter/kalamitra/gemini-key
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          - dynamodb:Scan
+          Resource:
+            Fn::GetAtt:
+            - ReferencePricesTable
+            - Arn
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        PriceApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /price
+            Method: POST
+    Metadata:
+      SamResourceId: PriceFunction
+  ProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ProductsFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:DeleteItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - ProductsTable
+            - Arn
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        GetProducts:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /products
+            Method: GET
+        PostProducts:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /products
+            Method: POST
+        DeleteProducts:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /products
+            Method: DELETE
+    Metadata:
+      SamResourceId: ProductsFunction
+  ShopFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ShopFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - ProductsTable
+            - Arn
+      Events:
+        GetShop:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /shop/{shopId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: ShopFunction
+  EnquiryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: EnquiryFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          Resource:
+            Fn::GetAtt:
+            - EnquiriesTable
+            - Arn
+      Events:
+        PostEnquiry:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /enquiry
+            Method: POST
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: EnquiryFunction
+  ExportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ExportFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - ProductsTable
+            - Arn
+      Events:
+        ExportCsv:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /export.csv
+            Method: GET
+    Metadata:
+      SamResourceId: ExportFunction
+  StatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: StatsFunction
+      Handler: app.lambda_handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - ProductsTable
+            - Arn
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - EnquiriesTable
+            - Arn
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+            Fn::GetAtt:
+            - UsageTable
+            - Arn
+      Events:
+        GetStats:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /stats
+            Method: GET
+    Metadata:
+      SamResourceId: StatsFunction
+Outputs:
+  ApiUrl:
+    Description: HTTP API endpoint URL in ap-southeast-2
+    Value:
+      Fn::Sub: https://${KalaMitraHttpApi}.execute-api.ap-southeast-2.amazonaws.com
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value:
+      Ref: UserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value:
+      Ref: UserPoolClient
+  MediaBucketName:
+    Description: S3 Media Bucket Name
+    Value:
+      Ref: MediaBucket
