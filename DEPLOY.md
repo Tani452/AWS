@@ -28,20 +28,49 @@ AWS Amplify Hosting provides instant global CDN distribution, automatic HTTPS, a
 
 ### Step 3: Configure App and Upload `dist.zip`
 1. **App name**: Enter `kalamitra`.
-2. **Environment name**: Enter `production` (or `main`).
+2. **Environment name**: Enter `production` (or `main` / `staging`).
 3. **Method**: Select **Drag and drop** (or **Zip**).
 4. Drag and drop `frontend/dist.zip` (located in `c:\Users\Tanishq\Downloads\kalamitra\frontend\dist.zip`) into the upload dropzone, or click **Browse** and select `dist.zip`.
+   > [!NOTE]
+   > `frontend/dist.zip` has been packaged with POSIX-standard forward-slash directory paths (`assets/...`) so Amplify and S3 extract nested asset directories cleanly.
 5. Click **Save and deploy**.
 
-### Step 4: Configure SPA Rewrites and Redirects (Crucial for `/shop/:shopId`)
-Because KalaMitra is a Single Page Application (SPA), direct browser navigation or refreshing on deep routes (e.g., `https://<domain>/shop/mock-artisan-101`) must serve `index.html` with HTTP 200 rather than throwing a 404.
+> [!TIP]
+> **CLI Alternative for 1-step deployment:**
+> ```bash
+> # 1. Create deployment to obtain signed upload URL and Job ID
+> aws amplify create-deployment --app-id <app-id> --branch-name <branch> --region ap-southeast-2
+> # 2. Upload zip via PUT (curl or python)
+> curl.exe -X PUT -T frontend/dist.zip "<zipUploadUrl>"
+> # 3. Trigger deployment
+> aws amplify start-deployment --app-id <app-id> --branch-name <branch> --job-id <job-id> --region ap-southeast-2
+> ```
 
-1. In the Amplify left navigation menu, click **Rewrites and redirects** (under **Hosting** or **App settings**).
-2. Click **Manage rewrites** (or **Add rewrite**).
-3. Ensure or add the following SPA rule:
-   - **Source address**: `</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json|wasm)$)([^.]+$)/>`
-   - **Target address**: `/index.html`
-   - **Type**: `200 (Rewrite)`
+### Step 4: Configure SPA Rewrites and Redirects (Crucial for `/shop/:shopId`)
+Because KalaMitra is a Single Page Application (SPA), direct browser navigation or refreshing on deep routes must serve `index.html` with HTTP 200 rather than throwing a 404.
+
+1. In the Amplify left navigation menu, click **Rewrites and redirects** (under **Hosting**).
+2. Click **Manage rewrites and redirects**.
+3. Replace the contents of the JSON editor with the official Amplify SPA rule:
+```json
+[
+  {
+    "source": "/<*>",
+    "target": "/index.html",
+    "status": "404-200"
+  }
+]
+```
+*(Alternatively, if using regex matching, remember that JSON requires escaping backslashes as `\\.`)*:
+```json
+[
+  {
+    "source": "</^[^.]+$|\\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json|wasm)$)([^.]+$)/>",
+    "target": "/index.html",
+    "status": "200"
+  }
+]
+```
 4. Click **Save**.
 
 ### Step 5: Test the Live URL
