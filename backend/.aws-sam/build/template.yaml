@@ -168,7 +168,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: UploadUrlFunction
-      Handler: app.lambda_handler
+      Handler: upload_url.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -200,7 +200,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: EnhanceFunction
-      Handler: app.lambda_handler
+      Handler: enhance.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -235,7 +235,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: CatalogFunction
-      Handler: app.lambda_handler
+      Handler: catalog.app.lambda_handler
       Environment:
         Variables:
           AI_PROVIDER: gemini
@@ -270,7 +270,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: PriceFunction
-      Handler: app.lambda_handler
+      Handler: price.app.lambda_handler
       Environment:
         Variables:
           AI_PROVIDER: gemini
@@ -314,7 +314,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ProductsFunction
-      Handler: app.lambda_handler
+      Handler: products.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -365,7 +365,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ShopFunction
-      Handler: app.lambda_handler
+      Handler: shop.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -392,7 +392,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: EnquiryFunction
-      Handler: app.lambda_handler
+      Handler: enquiry.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -418,7 +418,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ExportFunction
-      Handler: app.lambda_handler
+      Handler: export.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
@@ -443,7 +443,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: StatsFunction
-      Handler: app.lambda_handler
+      Handler: stats.app.lambda_handler
       Policies:
       - Statement:
         - Effect: Allow
