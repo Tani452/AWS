@@ -8,6 +8,7 @@ import OfflineBanner from './components/OfflineBanner';
 import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
 import HomeScreen from './screens/HomeScreen';
+import AddProductWizard from './screens/AddProductWizard';
 import MyShopScreen from './screens/MyShopScreen';
 import PublicShopScreen from './screens/PublicShopScreen';
 import ImpactScreen from './screens/ImpactScreen';
@@ -38,6 +39,14 @@ function AppContent() {
             element={
               <ProtectedRoute>
                 <HomeScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/add-product"
+            element={
+              <ProtectedRoute>
+                <AddProductWizard />
               </ProtectedRoute>
             }
           />

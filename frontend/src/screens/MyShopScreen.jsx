@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getProducts, deleteProduct } from '../api';
-import { ArrowLeft, Trash2, Plus, Volume2 } from 'lucide-react';
+import { ArrowLeft, Trash2, Plus, Volume2, Share2, ExternalLink } from 'lucide-react';
 
 export default function MyShopScreen() {
   const { t, speak, lang } = useLanguage();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
+
+  const shopId = user?.sub || user?.userId || 'my-shop';
+  const publicShopUrl = `${window.location.origin}/#/shop/${shopId}`;
 
   const loadProducts = async () => {
     setLoading(true);
@@ -29,7 +34,7 @@ export default function MyShopScreen() {
   }, []);
 
   const handleDelete = async (productId, title) => {
-    if (!window.confirm(`Delete ${title}?`)) return;
+    if (!window.confirm(`Are you sure you want to delete "${title}" from your shop?`)) return;
     setDeletingId(productId);
     try {
       await deleteProduct(productId);
@@ -41,8 +46,15 @@ export default function MyShopScreen() {
     }
   };
 
+  const handleShareShopWhatsApp = () => {
+    const text = encodeURIComponent(
+      `Namaste! Visit my KalaMitra artisan shop to see my latest handcrafted creations: ${publicShopUrl}`
+    );
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
   return (
-    <div className="mobile-container p-5 space-y-5">
+    <div className="mobile-container p-5 space-y-5 pb-16">
       {/* Top navigation */}
       <div className="flex items-center justify-between">
         <button
@@ -56,10 +68,41 @@ export default function MyShopScreen() {
         </h1>
         <button
           onClick={() => navigate('/add-product')}
-          className="p-3 rounded-2xl bg-saffron-600 text-white shadow-md active:scale-95 transition-transform"
+          className="p-3 rounded-2xl bg-saffron-600 text-white shadow-md active:scale-95 transition-transform flex items-center space-x-1"
+          title={t('btnBigAddProduct')}
         >
           <Plus className="w-5 h-5" />
         </button>
+      </div>
+
+      {/* Public Shop Link & WhatsApp Share Strip */}
+      <div className="bg-gradient-to-r from-indigo-900 to-indigo-950 p-4 rounded-3xl text-white flex items-center justify-between shadow-md">
+        <div className="min-w-0 pr-2">
+          <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">
+            Public Storefront
+          </span>
+          <p className="text-xs font-medium text-indigo-100 truncate">
+            No login required for buyers
+          </p>
+        </div>
+        <div className="flex space-x-2 flex-shrink-0">
+          <button
+            onClick={() => window.open(publicShopUrl, '_blank')}
+            className="p-2.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold flex items-center space-x-1"
+            title="View Public Storefront"
+          >
+            <ExternalLink className="w-4 h-4" />
+            <span className="hidden sm:inline">View</span>
+          </button>
+          <button
+            onClick={handleShareShopWhatsApp}
+            className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1"
+            title="Share on WhatsApp"
+          >
+            <Share2 className="w-4 h-4" />
+            <span className="hidden sm:inline">WhatsApp</span>
+          </button>
+        </div>
       </div>
 
       {/* Loading state skeleton */}
@@ -145,7 +188,7 @@ export default function MyShopScreen() {
                     className="px-3.5 py-2 rounded-xl text-red-600 hover:bg-red-50 text-sm font-bold flex items-center space-x-1.5 active:scale-95"
                   >
                     <Trash2 className="w-4 h-4" />
-                    <span>{deletingId === p.productId ? '...' : 'Delete'}</span>
+                    <span>{deletingId === p.productId ? 'Deleting...' : 'Delete'}</span>
                   </button>
                 </div>
               </div>

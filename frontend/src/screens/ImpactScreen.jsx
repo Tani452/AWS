@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { useNavigate } from 'react-router-dom';
-import { getStats } from '../api';
-import { ArrowLeft, Clock, ShoppingBag, MessageSquare, Award, Volume2 } from 'lucide-react';
+import { getStats, exportCatalogCsv } from '../api';
+import { ArrowLeft, Clock, ShoppingBag, MessageSquare, Award, Volume2, Download, Check } from 'lucide-react';
 
 export default function ImpactScreen() {
   const { t, speak } = useLanguage();
@@ -15,6 +15,8 @@ export default function ImpactScreen() {
     isEstimate: true,
   });
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState(false);
 
   useEffect(() => {
     async function loadStats() {
@@ -30,8 +32,21 @@ export default function ImpactScreen() {
     loadStats();
   }, []);
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportCatalogCsv();
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 3000);
+    } catch (err) {
+      alert('Failed to export catalog: ' + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
-    <div className="mobile-container p-5 space-y-6">
+    <div className="mobile-container p-5 space-y-6 pb-16">
       {/* Top bar */}
       <div className="flex items-center justify-between">
         <button
@@ -43,7 +58,13 @@ export default function ImpactScreen() {
         <h1 className="text-xl font-black text-indigo-950">
           {t('impactScreen')}
         </h1>
-        <div className="w-10" />
+        <button
+          onClick={() => speak(`${stats.estimatedMinutesSaved} minutes saved. Estimated based on 15 minutes per craft cataloged.`, true)}
+          className="p-3 rounded-2xl bg-amber-100 text-amber-900 border border-amber-200"
+          title={t('readAloud')}
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Hero Impact Badge */}
@@ -57,8 +78,9 @@ export default function ImpactScreen() {
         <div className="text-base font-bold text-amber-100">
           {t('minutesSavedUnit')}
         </div>
-        <p className="text-xs text-amber-100/90 max-w-xs mx-auto leading-relaxed pt-1">
-          Estimated based on 15 minutes saved per craft cataloged via voice & AI.
+        {/* Clearly labelled as estimate */}
+        <p className="text-xs text-amber-100/90 max-w-xs mx-auto leading-relaxed pt-1 font-medium bg-black/10 py-1 px-3 rounded-full">
+          *Indicative estimate based on 15 mins saved per product cataloged
         </p>
       </div>
 
@@ -81,13 +103,41 @@ export default function ImpactScreen() {
         </div>
       </div>
 
+      {/* B2B / Marketplace CSV Export Button */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+        <div className="flex items-center space-x-2 text-indigo-950 font-black text-base">
+          <Download className="w-5 h-5 text-saffron-600" />
+          <span>B2B & Government Marketplace Export</span>
+        </div>
+        <p className="text-xs text-slate-500 font-medium leading-relaxed">
+          Download your complete bilingual catalog as a standardized CSV file ready for ONDC, GeM, or export marketplaces.
+        </p>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="w-full min-h-[54px] bg-indigo-900 hover:bg-indigo-950 active:scale-[0.98] text-white font-extrabold rounded-2xl flex items-center justify-center space-x-2 transition-transform shadow-md disabled:opacity-50"
+        >
+          {exportSuccess ? (
+            <>
+              <Check className="w-5 h-5 text-emerald-400" />
+              <span>Downloaded Successfully!</span>
+            </>
+          ) : (
+            <>
+              <Download className="w-5 h-5" />
+              <span>{exporting ? 'Generating CSV...' : t('exportCatalog')}</span>
+            </>
+          )}
+        </button>
+      </div>
+
       {/* Bharat Impact Highlights Card */}
       <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
         <div className="flex items-center space-x-2 text-indigo-900 font-extrabold text-base">
           <Award className="w-5 h-5 text-saffron-600" />
           <span>Empowering Bharat Artisans</span>
         </div>
-        <ul className="text-sm text-slate-600 space-y-2 font-medium">
+        <ul className="text-xs text-slate-600 space-y-2 font-medium">
           <li className="flex items-start space-x-2">
             <span className="text-emerald-500 font-bold">✓</span>
             <span>Bilingual e-commerce catalog ready for government & global export.</span>

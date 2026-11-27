@@ -12,6 +12,7 @@ import {
 } from 'aws-amplify/auth';
 
 const isMock = import.meta.env.VITE_MOCK === 'true' || !import.meta.env.VITE_USER_POOL_ID;
+export { isMock };
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Configure AWS Amplify in real backend mode
@@ -195,6 +196,132 @@ async function request(endpoint, options = {}) {
 // =============================================================================
 // PRODUCT & BUSINESS APIS
 // =============================================================================
+
+/**
+ * Requests a presigned S3 upload URL for an image asset.
+ */
+export async function getUploadUrl(contentType = 'image/jpeg') {
+  if (isMock) {
+    const fileUuid = 'mock-' + Date.now();
+    const ext = contentType === 'image/png' ? '.png' : '.jpg';
+    return {
+      uploadUrl: 'mock-s3-presigned-url',
+      key: `tmp/mock-artisan-101/${fileUuid}${ext}`,
+      expiresIn: 300,
+    };
+  }
+  return request('/upload-url', {
+    method: 'POST',
+    body: JSON.stringify({ contentType }),
+  });
+}
+
+/**
+ * Uploads a file blob directly to S3 via presigned PUT URL.
+ */
+export async function uploadToS3(uploadUrl, fileBlob, contentType = 'image/jpeg') {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return { ok: true };
+  }
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: fileBlob,
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to upload photo to S3 (status ${res.status})`);
+  }
+  return { ok: true };
+}
+
+/**
+ * Calls Rekognition /enhance endpoint to analyze image quality and detect category.
+ */
+export async function enhanceImage(key) {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return {
+      category: 'textiles',
+      quality: { brightness: 68, sharpness: 74, contrast: 62 },
+      tips: [
+        'Photo quality looks great! Lighting and craft details are clear.',
+        'High contrast against the surface highlights texture and colors.'
+      ],
+      rawLabels: ['Textile', 'Saree', 'Pattern', 'Fabric'],
+    };
+  }
+  return request('/enhance', {
+    method: 'POST',
+    body: JSON.stringify({ key }),
+  });
+}
+
+/**
+ * Calls Gemini /catalog endpoint to generate bilingual e-commerce title, story, and tags.
+ */
+export async function generateCatalog({ transcript, language = 'hi-IN', category, imageKey }) {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return {
+      title_en: 'Heritage Handcrafted Artisan Craft',
+      title_hi: 'पारंपरिक हस्तनिर्मित कारीगरी शिल्प',
+      description_en: 'Authentic handmade creation crafted with dedication and heritage techniques passed down through generations. Beautifully textured and rich in Indian cultural tradition.',
+      description_hi: 'पीढ़ियों से चली आ रही पारंपरिक कारीगरी से तैयार किया गया शुद्ध हस्तशिल्प। भारतीय संस्कृति और कला का अनुपम संगम।',
+      category: category || 'textiles',
+      materials: ['Pure Silk', 'Natural Organic Dyes', 'Fine Cotton'],
+      technique: 'Traditional Handloom Weaving',
+      craft_tradition: 'Heritage Artisan Craft',
+      care_instructions_en: 'Gently wipe with dry soft cloth or dry clean. Keep away from harsh direct sunlight.',
+      tags: ['handcrafted', 'traditional', 'artisanal', 'madeinbharat', 'authentic'],
+      seo_keywords: ['handmade indian craft', 'authentic artisan goods', 'traditional decor'],
+      detected_language: language,
+    };
+  }
+  return request('/catalog', {
+    method: 'POST',
+    body: JSON.stringify({ transcript, language, category, imageKey }),
+  });
+}
+
+/**
+ * Calls /price endpoint to compute fair-trade price range, cost breakdown, and reasoning.
+ */
+export async function getPriceRecommendation({ category, materialCostInr, hoursOfWork, quantity = 1, imageKey }) {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const mat = Number(materialCostInr) || 200;
+    const hrs = Number(hoursOfWork) || 2;
+    const qty = Number(quantity) || 1;
+    const unitMat = mat / qty;
+    const unitLabour = (hrs * 100) / qty;
+    const floor = unitMat + unitLabour;
+    const suggested = Math.round((floor * 1.35) / 10) * 10;
+    const min = Math.round((floor * 1.1) / 10) * 10;
+    const max = Math.round((floor * 1.75) / 10) * 10;
+    return {
+      min_price: min,
+      suggested_price: suggested,
+      max_price: max,
+      reasoning_en: `Fair trade price covers ₹${Math.round(unitMat)} in materials, ₹${Math.round(unitLabour)} in artisan wages (₹100/hr benchmark), plus a 35% sustainable artisan profit margin.`,
+      reasoning_hi: `यह न्यायसंगत मूल्य ₹${Math.round(unitMat)} सामग्री लागत, ₹${Math.round(unitLabour)} कारीगर मजदूरी (₹100 प्रति घंटा) और 35% लाभ जोड़कर तय किया गया है।`,
+      breakdown: {
+        material: Math.round(unitMat),
+        labour: Math.round(unitLabour),
+        margin: Math.round(suggested - floor),
+      },
+      tips: [
+        'Mention the hours of handmade effort in your product story to justify premium pricing.',
+        'Bundle with complementary items or small craft gifts for higher order value.',
+        'Offer festive or gift packaging for special occasions.'
+      ],
+    };
+  }
+  return request('/price', {
+    method: 'POST',
+    body: JSON.stringify({ category, materialCostInr, hoursOfWork, quantity, imageKey }),
+  });
+}
 export async function getProducts() {
   if (isMock) {
     return { products: getMockProducts(), count: getMockProducts().length };
@@ -210,7 +337,7 @@ export async function saveProduct(productData) {
       productId: 'prod-' + Date.now(),
       ownerId: 'mock-artisan-101',
       shopId: 'mock-artisan-101',
-      imageUrl: productData.imageUrl || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80',
+      imageUrl: productData.imageUrl || productData.finalDataUrl || productData.previewUrl || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80',
       createdAt: new Date().toISOString(),
     };
     list.unshift(newProd);
