@@ -30,7 +30,8 @@ export default function WelcomeScreen() {
         {/* Read aloud intro button */}
         <button
           onClick={() => speak(t('welcomeListenInstruction'))}
-          className="mt-4 inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-amber-100 text-amber-900 font-semibold text-sm hover:bg-amber-200 transition-colors"
+          aria-label={t('readAloud') || "Read welcome instructions aloud"}
+          className="mt-4 inline-flex items-center space-x-2 px-5 py-2.5 min-h-[44px] rounded-full bg-amber-100 text-amber-900 font-semibold text-sm hover:bg-amber-200 transition-colors"
         >
           <Volume2 className="w-4 h-4 text-saffron-600" />
           <span>{t('readAloud')}</span>

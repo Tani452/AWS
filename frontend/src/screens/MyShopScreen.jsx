@@ -59,7 +59,8 @@ export default function MyShopScreen() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/home')}
-          className="p-3 rounded-2xl bg-white border border-slate-200 text-slate-800 active:scale-95 transition-transform"
+          aria-label="Back to home"
+          className="w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-800 flex items-center justify-center active:scale-95 transition-transform"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
@@ -68,7 +69,8 @@ export default function MyShopScreen() {
         </h1>
         <button
           onClick={() => navigate('/add-product')}
-          className="p-3 rounded-2xl bg-saffron-600 text-white shadow-md active:scale-95 transition-transform flex items-center space-x-1"
+          aria-label={t('btnBigAddProduct') || "Add new product"}
+          className="w-11 h-11 rounded-2xl bg-saffron-600 text-white shadow-md active:scale-95 transition-transform flex items-center justify-center"
           title={t('btnBigAddProduct')}
         >
           <Plus className="w-5 h-5" />
@@ -88,7 +90,8 @@ export default function MyShopScreen() {
         <div className="flex space-x-2 flex-shrink-0">
           <button
             onClick={() => window.open(publicShopUrl, '_blank')}
-            className="p-2.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold flex items-center space-x-1"
+            aria-label="View public storefront in new tab"
+            className="min-h-[44px] px-3 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold flex items-center space-x-1"
             title="View Public Storefront"
           >
             <ExternalLink className="w-4 h-4" />
@@ -96,7 +99,8 @@ export default function MyShopScreen() {
           </button>
           <button
             onClick={handleShareShopWhatsApp}
-            className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1"
+            aria-label="Share public storefront on WhatsApp"
+            className="min-h-[44px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1"
             title="Share on WhatsApp"
           >
             <Share2 className="w-4 h-4" />
@@ -150,6 +154,10 @@ export default function MyShopScreen() {
                   src={p.imageUrl || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80'}
                   alt={displayTitle}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80';
+                  }}
                 />
                 <div className="absolute top-3 right-3 bg-indigo-950/80 backdrop-blur text-white px-3 py-1.5 rounded-full text-base font-black shadow-md">
                   ₹{p.price}
@@ -169,10 +177,11 @@ export default function MyShopScreen() {
 
                   <button
                     onClick={() => speak(`${displayTitle}. Price: ${p.price} rupees. ${displayDesc}`, true)}
-                    className="p-2 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    aria-label={t('readAloud') || "Read product details aloud"}
+                    className="w-11 h-11 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100 flex items-center justify-center shrink-0"
                     title={t('readAloud')}
                   >
-                    <Volume2 className="w-4 h-4" />
+                    <Volume2 className="w-5 h-5" />
                   </button>
                 </div>
 
@@ -185,7 +194,8 @@ export default function MyShopScreen() {
                   <button
                     onClick={() => handleDelete(p.productId, displayTitle)}
                     disabled={deletingId === p.productId}
-                    className="px-3.5 py-2 rounded-xl text-red-600 hover:bg-red-50 text-sm font-bold flex items-center space-x-1.5 active:scale-95"
+                    aria-label={`Delete ${displayTitle}`}
+                    className="min-h-[44px] px-3.5 py-2 rounded-xl text-red-600 hover:bg-red-50 text-sm font-bold flex items-center space-x-1.5 active:scale-95"
                   >
                     <Trash2 className="w-4 h-4" />
                     <span>{deletingId === p.productId ? 'Deleting...' : 'Delete'}</span>

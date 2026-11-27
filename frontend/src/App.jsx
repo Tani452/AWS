@@ -76,14 +76,60 @@ function AppContent() {
   );
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('KalaMitra App Error:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-saffron-600 to-amber-500 text-white flex items-center justify-center text-3xl mb-4 shadow-lg">
+            🪔
+          </div>
+          <h2 className="text-xl font-black text-indigo-950 mb-2">
+            KalaMitra - कला मित्र
+          </h2>
+          <p className="text-sm text-slate-600 mb-6 max-w-sm">
+            {this.state.error?.message || 'Display updated. Tap below to reload your shop.'}
+          </p>
+          <button
+            onClick={() => {
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then((regs) => {
+                  for (let reg of regs) reg.unregister();
+                });
+              }
+              window.location.reload();
+            }}
+            className="px-6 py-3 bg-saffron-600 hover:bg-saffron-700 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-all"
+          >
+            Refresh Shop
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
-    <LanguageProvider>
-      <AuthProvider>
-        <HashRouter>
-          <AppContent />
-        </HashRouter>
-      </AuthProvider>
-    </LanguageProvider>
+    <ErrorBoundary>
+      <LanguageProvider>
+        <AuthProvider>
+          <HashRouter>
+            <AppContent />
+          </HashRouter>
+        </AuthProvider>
+      </LanguageProvider>
+    </ErrorBoundary>
   );
 }

@@ -337,6 +337,13 @@ Resources:
             Fn::GetAtt:
             - UsageTable
             - Arn
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          - s3:PutObject
+          - s3:DeleteObject
+          Resource:
+            Fn::Sub: ${MediaBucket.Arn}/*
       Events:
         GetProducts:
           Type: HttpApi
@@ -376,6 +383,11 @@ Resources:
             Fn::GetAtt:
             - ProductsTable
             - Arn
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          Resource:
+            Fn::Sub: ${MediaBucket.Arn}/*
       Events:
         GetShop:
           Type: HttpApi

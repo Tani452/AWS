@@ -322,6 +322,12 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt UsageTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource: !Sub "${MediaBucket.Arn}/*"
       Events:
         GetProducts:
           Type: HttpApi
@@ -354,6 +360,10 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Query
               Resource: !GetAtt ProductsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "${MediaBucket.Arn}/*"
       Events:
         GetShop:
           Type: HttpApi

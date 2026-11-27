@@ -100,7 +100,8 @@ export default function PublicShopScreen() {
           {/* WhatsApp Share Button */}
           <button
             onClick={handleShareShopWhatsApp}
-            className="p-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md active:scale-95 transition-all"
+            aria-label="Share shop on WhatsApp"
+            className="min-h-[44px] px-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md active:scale-95 transition-all"
             title="Share Shop on WhatsApp"
           >
             <Share2 className="w-4 h-4" />
@@ -152,6 +153,10 @@ export default function PublicShopScreen() {
                   src={p.imageUrl || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80'}
                   alt={displayTitle}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80';
+                  }}
                 />
                 <div className="absolute top-3 right-3 bg-saffron-600 text-white px-3.5 py-1.5 rounded-full text-base font-black shadow-md">
                   ₹{p.price}
@@ -174,10 +179,11 @@ export default function PublicShopScreen() {
 
                   <button
                     onClick={() => speak(`${displayTitle}. Price: ${p.price} rupees. ${displayDesc}`, true)}
-                    className="p-2 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    aria-label={t('readAloud') || "Read product description aloud"}
+                    className="w-11 h-11 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100 flex items-center justify-center shrink-0"
                     title={t('readAloud')}
                   >
-                    <Volume2 className="w-4 h-4" />
+                    <Volume2 className="w-5 h-5" />
                   </button>
                 </div>
 
@@ -225,7 +231,8 @@ export default function PublicShopScreen() {
               </div>
               <button
                 onClick={() => setSelectedProduct(null)}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-full"
+                aria-label="Close product details dialog"
+                className="w-11 h-11 text-slate-500 hover:text-slate-800 rounded-full flex items-center justify-center active:scale-95 transition-transform"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -235,9 +242,13 @@ export default function PublicShopScreen() {
             <div className="space-y-3">
               <div className="h-44 rounded-2xl overflow-hidden bg-slate-100">
                 <img
-                  src={selectedProduct.imageUrl}
+                  src={selectedProduct.imageUrl || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80'}
                   alt={selectedProduct.title_en}
                   className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80';
+                  }}
                 />
               </div>
 

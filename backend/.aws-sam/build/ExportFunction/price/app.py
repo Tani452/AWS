@@ -161,10 +161,21 @@ def lambda_handler(event, context):
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
-    except AIError as e:
-        return error_response(e.message, status_code=503)
-    except Exception:
-        return error_response("Failed to generate price recommendations", status_code=500)
+    except (AIError, Exception) as e:
+        print(f"Notice: Gemini pricing recommendation failed ({type(e).__name__}: {str(e)}), applying mathematical fair-trade formula.")
+        ai_result = {
+            "suggested_price": round(cost_floor * 1.35, 2),
+            "min_price": round(cost_floor * 1.10, 2),
+            "max_price": round(cost_floor * 1.75, 2),
+            "reasoning_en": f"Calculated based on raw materials of ₹{material_cost} and fair wage of ₹{labour_cost} for {hours_of_work} hours of artisan effort (₹100/hr) plus a 35% margin.",
+            "reasoning_hi": f"₹{material_cost} की सामग्री लागत और {hours_of_work} घंटे के श्रम (₹{labour_cost}) के आधार पर 35% लाभ जोड़कर उचित मूल्य निर्धारित किया गया है।",
+            "tips": [
+                "Mention your craft tradition in the story to highlight authenticity.",
+                "Offer bundle options for multiple pieces to increase overall order value.",
+                "Provide secure festive packaging for gift buyers.",
+            ],
+            "isFallback": True,
+        }
 
     # 5. Enforce in code: suggested >= cost floor and min <= suggested <= max
     try:

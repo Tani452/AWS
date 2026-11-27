@@ -30,10 +30,10 @@ GEMINI_ENDPOINT_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 )
 
-# Operational limits
-REQUEST_TIMEOUT_SECONDS = 20
-MAX_RETRIES = 2
-INITIAL_BACKOFF_SECONDS = 1.0
+# Operational limits - safe for Lambda 25s timeout
+REQUEST_TIMEOUT_SECONDS = 15
+MAX_RETRIES = 1
+INITIAL_BACKOFF_SECONDS = 1.5
 
 
 class AIError(Exception):
@@ -218,13 +218,17 @@ def _generate_json_gemini(
             status = e.code
             logger.warning("Gemini API HTTP %d on attempt %d/%d", status, attempt + 1, MAX_RETRIES + 1)
 
-            # Retry only on 429 (rate limit) or 5xx (server error)
+            # Retry once on 429 (rate limit) or 5xx (server error)
             if status == 429 or 500 <= status < 600:
                 if attempt < MAX_RETRIES:
                     sleep_time = INITIAL_BACKOFF_SECONDS * (2**attempt)
                     time.sleep(sleep_time)
                     continue
-            raise AIError("The AI service is currently busy or experiencing issues. Please try again shortly.") from e
+
+            if status == 429:
+                raise AIError("AI assistant is experiencing high demand right now. Please wait a moment and try again.") from e
+            else:
+                raise AIError("The AI service is currently busy or experiencing issues. Please try again shortly.") from e
 
         except (urllib.error.URLError, TimeoutError) as e:
             last_exception = e
@@ -233,7 +237,7 @@ def _generate_json_gemini(
                 sleep_time = INITIAL_BACKOFF_SECONDS * (2**attempt)
                 time.sleep(sleep_time)
                 continue
-            raise AIError("The AI service timed out. Please try again.") from e
+            raise AIError("AI service request timed out. Please check your connection and retry.") from e
 
         except ValueError as e:
             # JSON parsing error from the model response - retry once

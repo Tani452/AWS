@@ -31,8 +31,8 @@ export default function Navbar() {
           {/* Read aloud button */}
           <button
             onClick={() => speak(t('tagline'), true)}
-            aria-label={t('readAloud')}
-            className="p-2.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 active:scale-95 transition-transform"
+            aria-label={t('readAloud') || "Read aloud"}
+            className="w-11 h-11 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 flex items-center justify-center active:scale-95 transition-transform"
             title={t('readAloud')}
           >
             <Volume2 className="w-5 h-5" />
@@ -42,7 +42,8 @@ export default function Navbar() {
           <div className="relative">
             <button
               onClick={() => setShowLangMenu(!showLangMenu)}
-              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold text-sm shadow-sm active:scale-95 transition-transform"
+              aria-label="Select language"
+              className="flex items-center space-x-1.5 px-3 min-h-[44px] rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold text-sm shadow-sm active:scale-95 transition-transform"
             >
               <Globe className="w-4 h-4 text-saffron-600" />
               <span>{currentLangObj.label}</span>
@@ -66,7 +67,7 @@ export default function Navbar() {
                         setLang(l.code);
                         setShowLangMenu(false);
                       }}
-                      className={`w-full text-left px-4 py-2.5 flex items-center justify-between text-base font-semibold hover:bg-amber-50 ${
+                      className={`w-full text-left px-4 py-3 min-h-[44px] flex items-center justify-between text-base font-semibold hover:bg-amber-50 ${
                         l.code === lang ? 'text-saffron-600 bg-amber-50/80 font-bold' : 'text-slate-800'
                       }`}
                     >
@@ -84,8 +85,8 @@ export default function Navbar() {
             <button
               onClick={logout}
               title={t('logout')}
-              aria-label={t('logout')}
-              className="p-2.5 rounded-full bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 active:scale-95 transition-transform"
+              aria-label={t('logout') || "Sign out"}
+              className="w-11 h-11 rounded-full bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 flex items-center justify-center active:scale-95 transition-transform"
             >
               <LogOut className="w-5 h-5" />
             </button>

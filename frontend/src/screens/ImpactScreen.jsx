@@ -51,7 +51,8 @@ export default function ImpactScreen() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/home')}
-          className="p-3 rounded-2xl bg-white border border-slate-200 text-slate-800 active:scale-95 transition-transform"
+          aria-label="Back to home"
+          className="w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-800 flex items-center justify-center active:scale-95 transition-transform"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
@@ -60,7 +61,8 @@ export default function ImpactScreen() {
         </h1>
         <button
           onClick={() => speak(`${stats.estimatedMinutesSaved} minutes saved. Estimated based on 15 minutes per craft cataloged.`, true)}
-          className="p-3 rounded-2xl bg-amber-100 text-amber-900 border border-amber-200"
+          aria-label={t('readAloud') || "Read impact stats aloud"}
+          className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-900 border border-amber-200 flex items-center justify-center"
           title={t('readAloud')}
         >
           <Volume2 className="w-5 h-5" />
