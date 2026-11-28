@@ -85,13 +85,14 @@ def lambda_handler(event, context):
         ]
         writer.writerow(row)
 
-    csv_data = csv_buffer.getvalue()
+    # Prefix with UTF-8 BOM (\ufeff) so Microsoft Excel on Windows renders Hindi / Devanagari characters cleanly without mojibake
+    csv_data = "\ufeff" + csv_buffer.getvalue()
 
     return {
         "statusCode": 200,
         "headers": {
             "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": f'attachment; filename="kalamitra_catalog_{user_id[:8]}.csv"',
+            "Content-Disposition": f'attachment; filename="kaarigar_catalog_{user_id[:8]}.csv"',
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET,OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type,Authorization",

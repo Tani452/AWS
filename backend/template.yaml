@@ -17,6 +17,8 @@ Globals:
         USAGE_TABLE: !Ref UsageTable
         REFERENCE_PRICES_TABLE: !Ref ReferencePricesTable
         MEDIA_BUCKET: !Ref MediaBucket
+        AI_PROVIDER: gemini
+        GEMINI_KEY_PARAM: /kalamitra/gemini-key
 
 Resources:
   # ==========================================
@@ -242,12 +244,12 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: catalog.app.lambda_handler
-      Environment:
-        Variables:
-          AI_PROVIDER: gemini
-          GEMINI_KEY_PARAM: /kalamitra/gemini-key
       Policies:
         - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "${MediaBucket.Arn}/*"
             - Effect: Allow
               Action:
                 - ssm:GetParameter
@@ -271,10 +273,6 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: price.app.lambda_handler
-      Environment:
-        Variables:
-          AI_PROVIDER: gemini
-          GEMINI_KEY_PARAM: /kalamitra/gemini-key
       Policies:
         - Statement:
             - Effect: Allow
@@ -444,6 +442,21 @@ Resources:
             ApiId: !Ref KalaMitraHttpApi
             Path: /stats
             Method: GET
+
+  TtsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: tts.app.lambda_handler
+      Events:
+        PostTts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KalaMitraHttpApi
+            Path: /tts
+            Method: POST
+            Auth:
+              Authorizer: NONE
 
 # ==========================================
 # Outputs

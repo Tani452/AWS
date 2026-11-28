@@ -21,6 +21,8 @@ Globals:
           Ref: ReferencePricesTable
         MEDIA_BUCKET:
           Ref: MediaBucket
+        AI_PROVIDER: gemini
+        GEMINI_KEY_PARAM: /kalamitra/gemini-key
 Resources:
   MediaBucket:
     Type: AWS::S3::Bucket
@@ -236,12 +238,13 @@ Resources:
     Properties:
       CodeUri: CatalogFunction
       Handler: catalog.app.lambda_handler
-      Environment:
-        Variables:
-          AI_PROVIDER: gemini
-          GEMINI_KEY_PARAM: /kalamitra/gemini-key
       Policies:
       - Statement:
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          Resource:
+            Fn::Sub: ${MediaBucket.Arn}/*
         - Effect: Allow
           Action:
           - ssm:GetParameter
@@ -271,10 +274,6 @@ Resources:
     Properties:
       CodeUri: PriceFunction
       Handler: price.app.lambda_handler
-      Environment:
-        Variables:
-          AI_PROVIDER: gemini
-          GEMINI_KEY_PARAM: /kalamitra/gemini-key
       Policies:
       - Statement:
         - Effect: Allow
@@ -492,6 +491,23 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: StatsFunction
+  TtsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: TtsFunction
+      Handler: tts.app.lambda_handler
+      Events:
+        PostTts:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: KalaMitraHttpApi
+            Path: /tts
+            Method: POST
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: TtsFunction
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint URL in ap-southeast-2

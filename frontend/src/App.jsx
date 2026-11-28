@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import Navbar from './components/Navbar';
@@ -26,9 +26,12 @@ function ProtectedRoute({ children }) {
 }
 
 function AppContent() {
+  const location = useLocation();
+  const isBuyerStorefront = location.pathname.startsWith('/shop');
+
   return (
     <div className="min-h-screen bg-amber-50 flex flex-col font-sans">
-      <Navbar />
+      {!isBuyerStorefront && <Navbar />}
       <OfflineBanner />
       <main className="flex-1">
         <Routes>
@@ -85,17 +88,17 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
   componentDidCatch(error, errorInfo) {
-    console.error('KalaMitra App Error:', error, errorInfo);
+    console.error('Kaarigar App Error:', error, errorInfo);
   }
   render() {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-6 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-saffron-600 to-amber-500 text-white flex items-center justify-center text-3xl mb-4 shadow-lg">
+          <div className="w-16 h-16 rounded-2xl bg-saffron-600 text-white flex items-center justify-center text-3xl mb-4 shadow-sm">
             🪔
           </div>
           <h2 className="text-xl font-black text-indigo-950 mb-2">
-            KalaMitra - कला मित्र
+            Kaarigar - कारीगर
           </h2>
           <p className="text-sm text-slate-600 mb-6 max-w-sm">
             {this.state.error?.message || 'Display updated. Tap below to reload your shop.'}

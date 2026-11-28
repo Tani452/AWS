@@ -21,6 +21,7 @@ from shop import app as shop_app
 from enquiry import app as enquiry_app
 from export import app as export_app
 from stats import app as stats_app
+from tts import app as tts_app
 
 
 def _make_auth_event(sub="artisan-sub-1234", body=None, method="GET", path_params=None, query_params=None):
@@ -517,8 +518,8 @@ class TestExportFunction:
         assert "text/csv" in resp["headers"]["Content-Type"]
         assert "attachment; filename=" in resp["headers"]["Content-Disposition"]
 
-        # Parse CSV body
-        csv_reader = list(csv.reader(io.StringIO(resp["body"])))
+        # Parse CSV body (handles UTF-8 BOM)
+        csv_reader = list(csv.reader(io.StringIO(resp["body"].lstrip("\ufeff"))))
         assert len(csv_reader) == 2  # Header + 1 row
         headers = csv_reader[0]
         assert headers == [
@@ -572,3 +573,33 @@ class TestStatsFunction:
         # 6 products * 15 min saved = 90 min saved
         assert body["estimatedMinutesSaved"] == 90
         assert body["isEstimate"] is True
+
+
+# ==============================================================================
+# 9. TtsFunction Tests
+# ==============================================================================
+class TestTtsFunction:
+    @mock.patch("urllib.request.urlopen")
+    def test_tts_generation_success(self, mock_urlopen):
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = b"fake-mp3-audio-bytes"
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        event = {
+            "body": json.dumps({"text": "नमस्ते यह शिल्प सुंदर है", "language": "hi"}),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+        resp = tts_app.lambda_handler(event, None)
+        assert resp["statusCode"] == 200
+        body = json.loads(resp["body"])
+        assert "audioDataUrl" in body
+        assert body["audioDataUrl"].startswith("data:audio/mp3;base64,")
+        assert body["language"] == "hi"
+
+    def test_tts_missing_text(self):
+        event = {
+            "body": json.dumps({}),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+        resp = tts_app.lambda_handler(event, None)
+        assert resp["statusCode"] == 400

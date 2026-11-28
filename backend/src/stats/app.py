@@ -37,14 +37,27 @@ def lambda_handler(event, context):
     except Exception:
         products_count = 0
 
-    # 2. Count buyer enquiries received
+    # 2. Query buyer enquiries received for this artisan
     try:
         enq_resp = enquiries_table.query(
             KeyConditionExpression=Key("shopId").eq(user_id),
-            Select="COUNT",
         )
-        enquiries_count = enq_resp.get("Count", 0)
+        enquiries_items = enq_resp.get("Items", [])
+        enquiries = []
+        for item in enquiries_items:
+            enquiries.append({
+                "enquiryId": str(item.get("enquiryId", "")),
+                "productId": str(item.get("productId", "")),
+                "buyerName": str(item.get("buyerName", "")),
+                "buyerContact": str(item.get("buyerContact", "")),
+                "message": str(item.get("message", "")),
+                "quantity": int(item.get("quantity", 1)),
+                "createdAt": str(item.get("createdAt", "")),
+                "status": str(item.get("status", "new")),
+            })
+        enquiries_count = enq_resp.get("Count", len(enquiries))
     except Exception:
+        enquiries = []
         enquiries_count = 0
 
     # 3. Calculate estimated time saved
@@ -53,6 +66,7 @@ def lambda_handler(event, context):
     return success_response({
         "productsCount": products_count,
         "enquiriesCount": enquiries_count,
+        "enquiries": enquiries,
         "estimatedMinutesSaved": estimated_minutes_saved,
         "isEstimate": True,
         "note": "estimatedMinutesSaved is an indicative estimate based on 15 minutes cataloging time saved per product",

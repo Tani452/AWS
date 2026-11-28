@@ -7,6 +7,6 @@ architecture = "x86_64"
 handler = "upload_url.app.lambda_handler"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["UploadUrlFunction", "EnhanceFunction", "CatalogFunction", "PriceFunction", "ProductsFunction", "ShopFunction", "EnquiryFunction", "ExportFunction", "StatsFunction"]
+functions = ["UploadUrlFunction", "EnhanceFunction", "CatalogFunction", "PriceFunction", "ProductsFunction", "ShopFunction", "EnquiryFunction", "ExportFunction", "StatsFunction", "TtsFunction"]
 
 [layer_build_definitions]

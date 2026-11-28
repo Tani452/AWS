@@ -65,6 +65,9 @@ export default function AddProductWizard() {
   // STEP 1: PHOTO CAPTURE & UPLOAD
   // ---------------------------------------------------------------------------
   const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const [originalFile, setOriginalFile] = useState(null);
   const [resizedBlob, setResizedBlob] = useState(null);
   const [originalDataUrl, setOriginalDataUrl] = useState('');
@@ -139,8 +142,7 @@ export default function AddProductWizard() {
   // ---------------------------------------------------------------------------
   // STEP 1 HANDLERS: Photo Capture & Client-Side Resize
   // ---------------------------------------------------------------------------
-  const handlePhotoSelect = async (e) => {
-    const file = e.target.files?.[0];
+  const processImageFile = async (file) => {
     if (!file) return;
 
     setError('');
@@ -167,11 +169,92 @@ export default function AddProductWizard() {
       setRawImageKey(uploadResp.key);
       setFinalImageKey(uploadResp.key); // Default if studio unchanged
     } catch (err) {
-      setError('Photo preparation failed: ' + err.message);
+      const msg = err.message || '';
+      if (msg.includes('401') || msg.includes('expired') || msg.includes('signed in')) {
+        setError('Login session required: Please log in to your artisan account to upload photos and save products.');
+      } else {
+        setError('Photo preparation failed: ' + err.message);
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processImageFile(file);
+  };
+
+  const startLiveCamera = async () => {
+    setError('');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Live camera access is not supported by your browser. Please select an existing photo.');
+      return;
+    }
+
+    try {
+      setIsLiveCameraOpen(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch (camErr) {
+      console.warn('Camera access error:', camErr);
+      setIsLiveCameraOpen(false);
+      setError('Camera access denied or unavailable. Please click "Choose from Files" to upload an image.');
+    }
+  };
+
+  const stopLiveCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setIsLiveCameraOpen(false);
+  };
+
+  const handleCaptureFromLiveCamera = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async (blob) => {
+      stopLiveCamera();
+      if (blob) {
+        const file = new File([blob], `craft-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        await processImageFile(file);
+      }
+    }, 'image/jpeg', 0.92);
+  };
+
+  const handleRetake = () => {
+    setOriginalDataUrl('');
+    setOriginalFile(null);
+    setResizedBlob(null);
+    setRawImageKey('');
+    setFinalImageKey('');
+    setFileStats(null);
+    stopLiveCamera();
+  };
+
+  // Ensure camera stream is stopped if component unmounts
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   // ---------------------------------------------------------------------------
   // STEP 2 HANDLERS: AI Studio Analysis & Processing
@@ -279,8 +362,12 @@ export default function AddProductWizard() {
 
       recognition.onerror = (event) => {
         console.warn('Speech recognition notice:', event.error);
-        if (event.error !== 'no-speech') {
-          setError(`Mic alert: ${event.error}. You can also type description directly.`);
+        if (event.error === 'network') {
+          setError('Speech network error: Brave and privacy browsers block cloud speech servers by default. You can type below, tap the quick craft tags, or enable Google speech in brave://settings/privacy.');
+        } else if (event.error === 'not-allowed') {
+          setError('Microphone access blocked. Please tap the lock/tune icon in your URL bar and allow microphone permissions.');
+        } else if (event.error !== 'no-speech') {
+          setError(`Mic notice: ${event.error}. You can type or use the quick tags below.`);
         }
         setIsListening(false);
       };
@@ -325,9 +412,9 @@ export default function AddProductWizard() {
 
       setCatalog(catResult);
       setEditTitleEn(catResult.title_en || '');
-      setEditTitleHi(catResult.title_hi || '');
+      setEditTitleHi(catResult.title_regional || catResult.title_hi || '');
       setEditDescEn(catResult.description_en || '');
-      setEditDescHi(catResult.description_hi || '');
+      setEditDescHi(catResult.description_regional || catResult.description_hi || '');
       setCurrentStep(4);
     } catch (err) {
       console.warn('AI catalog generation notice:', err.message);
@@ -341,19 +428,48 @@ export default function AddProductWizard() {
       } catch {}
 
       if (!fallbackData) {
-        const catName = category ? category.replace('_', ' ') : 'handicraft';
+        const textLower = textDesc.toLowerCase();
+        const cleanCat = (category || 'handicrafts').replace('_', ' ');
+        const isWater = textLower.includes('पाणी') || textLower.includes('पिण्यासाठी') || textLower.includes('पानी') || textLower.includes('water');
+        const isClay = textLower.includes('माती') || textLower.includes('मटका') || textLower.includes('भांडे') || textLower.includes('clay');
+        const isTextile = textLower.includes('कापड') || textLower.includes('रेशम') || textLower.includes('सिल्क') || textLower.includes('साड़ी');
+
+        let titleEn = `Authentic Handcrafted ${cleanCat.charAt(0).toUpperCase() + cleanCat.slice(1)}`;
+        let descEn = 'Handcrafted with traditional devotion using authentic, sustainable materials that celebrate Indian artisan craftsmanship.';
+        let titleReg = `पारंपरिक हस्तनिर्मित ${cleanCat}`;
+        let descReg = `पारंपरिक कारागिरी आणि निष्ठेने साकारलेली हस्तकला: ${textDesc}। भारतीय समृद्ध संस्कृती आणि कौशल्याचा सुंदर संगम.`;
+
+        if (isWater) {
+          titleEn = 'Artisanal Pure Drinking Water Bottle & Vessel';
+          descEn = 'Specially crafted for healthy everyday hydration and storing pure drinking water. Handmade using authentic Indian artisan traditions to keep water naturally cool and fresh.';
+          titleReg = 'पारंपरिक हस्तनिर्मित पाणी पिण्याची बाटली';
+          descReg = `शुद्ध पाणी पिण्यासाठी आणि दैनंदिन वापरासाठी निष्ठेने घडवलेली सुंदर बाटली: ${textDesc}। अस्सल भारतीय कारागिरीचे प्रतीक.`;
+        } else if (isClay) {
+          titleEn = `Traditional Terracotta Clay Craft`;
+          descEn = 'Wheel-thrown by master artisans from organic riverbed clay. Naturally porous and eco-friendly, keeping water and food fresh and chemical-free.';
+          titleReg = 'पारंपरिक मातीची हस्तकला';
+          descReg = `नदीच्या नैसर्गिक मातीपासून कुंभाराच्या चाकावर घडवलेले अस्सल भांडे: ${textDesc}.`;
+        } else if (isTextile) {
+          titleEn = `Heritage Handwoven Fabric & Textile`;
+          descEn = 'Woven on traditional handlooms using organic natural yarns and heritage weave motifs. Represents authentic sustainable Indian craftsmanship.';
+          titleReg = 'पारंपरिक हातमाग विणकाम वस्त्र';
+          descReg = `पारंपरिक हातमागावर नैसर्गिक धाग्यांनी विणलेले देखणे वस्त्र: ${textDesc}.`;
+        }
+
         fallbackData = {
-          title_en: `Authentic Handcrafted ${catName.charAt(0).toUpperCase() + catName.slice(1)}`,
-          title_hi: `पारंपरिक हस्तनिर्मित ${catName}`,
-          description_en: `Handmade with traditional devotion: ${textDesc}. Created using authentic heritage techniques celebrating Indian artisan craftsmanship.`,
-          description_hi: `पारंपरिक कारीगरी और निष्ठा से तैयार: ${textDesc}। भारतीय शिल्प कला और परंपरा का सुंदर उदाहरण।`,
-          category: category || 'handicrafts',
-          materials: ['Pure Natural Materials'],
+          title_en: titleEn,
+          title_hi: `पारंपरिक हस्तनिर्मित ${cleanCat}`,
+          title_regional: titleReg,
+          description_en: descEn,
+          description_hi: `पारंपरिक कारीगरी और निष्ठा से तैयार: ${textDesc}। भारतीय शिल्प कला का सुंदर संगम।`,
+          description_regional: descReg,
+          category: isWater || isClay ? 'pottery' : (category || 'handicrafts'),
+          materials: ['Pure Natural Materials', 'Eco-friendly Elements'],
           technique: 'Traditional Handcraft',
           craft_tradition: 'Heritage Craft',
-          care_instructions_en: 'Gently wipe with a soft cloth. Keep away from harsh sunlight.',
+          care_instructions_en: 'Gently wipe with a soft cloth. Keep away from harsh direct sunlight.',
           tags: ['handcrafted', 'traditional', 'artisanal', 'madeinbharat'],
-          seo_keywords: ['authentic indian craft', 'handmade product'],
+          seo_keywords: ['authentic indian craft', 'handmade product', 'bharat crafts'],
         };
       }
 
@@ -362,7 +478,7 @@ export default function AddProductWizard() {
       setEditTitleHi(fallbackData.title_hi || '');
       setEditDescEn(fallbackData.description_en || '');
       setEditDescHi(fallbackData.description_hi || '');
-      setError('AI assistant is busy right now. We preserved a smart draft from your description so your demo continues smoothly!');
+      setError('AI assistant is busy right now. We preserved your draft description so you can continue editing.');
       setCurrentStep(4);
     } finally {
       setLoading(false);
@@ -419,11 +535,19 @@ export default function AddProductWizard() {
     setLoadingMessage('Saving product to your shop & S3 media...');
 
     try {
+      const regionalTitle = editTitleHi || catalog?.title_regional || catalog?.title_hi || '';
+      const regionalDesc = editDescHi || catalog?.description_regional || catalog?.description_hi || '';
+
       const productPayload = {
-        title_en: catalog?.title_en || 'Handcrafted Craft Item',
-        title_hi: catalog?.title_hi || 'हस्तनिर्मित शिल्प',
-        description_en: catalog?.description_en || transcript || '',
-        description_hi: catalog?.description_hi || '',
+        title_en: editTitleEn || catalog?.title_en || 'Handcrafted Craft Item',
+        title_hi: catalog?.title_hi || regionalTitle || 'हस्तनिर्मित शिल्प',
+        title_regional: regionalTitle,
+        [`title_${lang}`]: regionalTitle,
+        description_en: editDescEn || catalog?.description_en || transcript || '',
+        description_hi: catalog?.description_hi || regionalDesc || '',
+        description_regional: regionalDesc,
+        [`description_${lang}`]: regionalDesc,
+        language: lang,
         category,
         price: Number(chosenPrice),
         imageKey: finalImageKey,
@@ -462,7 +586,7 @@ export default function AddProductWizard() {
 
   const handleShareWhatsApp = () => {
     const text = encodeURIComponent(
-      `Namaste! Explore my authentic handcrafted ${savedProduct?.title_en || 'creation'} on KalaMitra: ${publicShopUrl}`
+      `Namaste! Explore my authentic handcrafted ${savedProduct?.title_en || 'creation'} on Kaarigar: ${publicShopUrl}`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
   };
@@ -515,7 +639,13 @@ export default function AddProductWizard() {
         </div>
 
         <button
-          onClick={() => speak(currentStep <= 5 ? t(`step${currentStep}Title`) : t('productSavedSuccess'))}
+          onClick={() => {
+            if (currentStep === 1) speak('step1Prompt');
+            else if (currentStep === 2) speak('step2Prompt');
+            else if (currentStep === 3) speak('step3Prompt');
+            else if (currentStep === 4) speak('step4Prompt');
+            else speak('productSavedSuccess');
+          }}
           aria-label={t('readAloud') || "Read aloud"}
           className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-900 border border-amber-200 flex items-center justify-center"
           title={t('readAloud')}
@@ -586,13 +716,13 @@ export default function AddProductWizard() {
           STEP 1: PHOTO CAPTURE & RESIZE
           ===================================================================== */}
       {currentStep === 1 && (
-        <div className="space-y-5">
+        <div className="space-y-5 max-w-2xl mx-auto">
           <div className="text-center space-y-1">
             <h2 className="text-xl font-black text-slate-900">
               {t('capturePhotoPrompt')}
             </h2>
             <p className="text-xs text-slate-500 font-semibold">
-              Take a clear picture in natural daylight. Images automatically optimize to max 1600px.
+              {t('capturePhotoSubtitle')}
             </p>
           </div>
 
@@ -606,25 +736,84 @@ export default function AddProductWizard() {
             className="hidden"
           />
 
-          {!originalDataUrl ? (
-            /* Big Camera Button (Min 180px touch box) */
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full h-64 border-3 border-dashed border-saffron-400 hover:border-saffron-600 bg-amber-50/60 rounded-3xl flex flex-col items-center justify-center p-6 space-y-3 active:scale-[0.99] transition-all shadow-inner"
-            >
-              <div className="w-20 h-20 rounded-3xl bg-saffron-600 text-white flex items-center justify-center shadow-lg shadow-saffron-600/30">
-                <Camera className="w-10 h-10" />
+          {isLiveCameraOpen ? (
+            /* Live Camera Viewfinder */
+            <div className="relative aspect-square w-full rounded-3xl overflow-hidden shadow-2xl border-4 border-saffron-500 bg-black flex flex-col justify-between">
+              <video
+                ref={(el) => {
+                  videoRef.current = el;
+                  if (el && streamRef.current && el.srcObject !== streamRef.current) {
+                    el.srcObject = streamRef.current;
+                    el.play().catch(() => {});
+                  }
+                }}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute top-4 right-4 z-10">
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="px-3.5 py-1.5 bg-black/70 hover:bg-black/90 text-white rounded-full text-xs font-bold shadow transition-all backdrop-blur"
+                >
+                  ✕ {t('closeCamera')}
+                </button>
               </div>
-              <div className="text-base font-black text-slate-900">
-                {t('cameraButton')}
+              <div className="absolute bottom-5 left-0 right-0 flex justify-center items-center z-10">
+                <button
+                  type="button"
+                  onClick={handleCaptureFromLiveCamera}
+                  aria-label={t('takeLivePhoto')}
+                  className="w-20 h-20 rounded-full bg-white border-4 border-saffron-600 shadow-2xl flex items-center justify-center active:scale-90 transition-transform"
+                >
+                  <div className="w-14 h-14 rounded-full bg-saffron-600 hover:bg-saffron-700 transition-colors shadow-inner flex items-center justify-center text-white">
+                    <Camera className="w-7 h-7" />
+                  </div>
+                </button>
               </div>
-              <p className="text-xs text-slate-500 font-medium max-w-xs text-center">
-                Tap here to take a photo or select from phone gallery
-              </p>
-            </button>
+            </div>
+          ) : !originalDataUrl ? (
+            /* Dual Option: Live Camera or File Upload */
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Option 1: Live Camera */}
+              <button
+                type="button"
+                onClick={startLiveCamera}
+                className="w-full min-h-[160px] border-2 border-saffron-600/30 hover:border-saffron-600 bg-white hover:bg-amber-100/50 rounded-3xl flex flex-col items-center justify-center p-5 space-y-2 active:scale-[0.98] transition-all shadow-sm"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-saffron-600 text-white flex items-center justify-center shadow-sm">
+                  <Camera className="w-7 h-7" />
+                </div>
+                <div className="text-base font-black text-slate-900">
+                  📷 {t('takeLivePhoto')}
+                </div>
+                <p className="text-xs text-slate-500 font-semibold text-center">
+                  {t('liveCameraSubtitle')}
+                </p>
+              </button>
+
+              {/* Option 2: Upload File / Gallery */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full min-h-[160px] border-2 border-dashed border-slate-300 hover:border-slate-400 bg-white rounded-3xl flex flex-col items-center justify-center p-5 space-y-2 active:scale-[0.98] transition-all shadow-sm"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center shadow-sm">
+                  <Upload className="w-7 h-7" />
+                </div>
+                <div className="text-base font-black text-slate-700">
+                  📁 {t('chooseFromFiles')}
+                </div>
+                <p className="text-xs text-slate-400 font-semibold text-center">
+                  Select image from files or gallery
+                </p>
+              </button>
+            </div>
           ) : (
             /* Photo Preview with stats */
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
               <div className="relative aspect-square w-full rounded-3xl overflow-hidden shadow-lg border-2 border-amber-200 bg-white">
                 <img
                   src={originalDataUrl}
@@ -632,34 +821,36 @@ export default function AddProductWizard() {
                   className="w-full h-full object-contain"
                 />
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-3 right-3 px-3.5 py-2 rounded-xl bg-black/70 text-white text-xs font-bold backdrop-blur flex items-center space-x-1.5 shadow"
+                  onClick={handleRetake}
+                  className="absolute bottom-3 right-3 px-3.5 py-2 rounded-xl bg-black/70 text-white text-xs font-bold backdrop-blur flex items-center space-x-1.5 shadow active:scale-95 transition-transform"
                 >
                   <RotateCcw className="w-4 h-4" />
-                  <span>Retake</span>
+                  <span>{t('retakePhoto')}</span>
                 </button>
               </div>
 
-              {fileStats && (
-                <div className="flex items-center justify-between text-xs bg-white p-3 rounded-2xl border border-slate-200 text-slate-600">
-                  <span className="font-semibold">
-                    Original: {fileStats.origKb} KB
-                  </span>
-                  <span className="font-black text-emerald-600">
-                    Optimized: {fileStats.resizedKb} KB (Max {fileStats.width}px)
-                  </span>
-                </div>
-              )}
+              <div className="space-y-4">
+                {fileStats && (
+                  <div className="space-y-2 bg-white p-4 rounded-2xl border border-slate-200 text-xs text-slate-600 shadow-sm">
+                    <div className="font-semibold text-slate-500">
+                      Original Size: <span className="font-bold text-slate-800">{fileStats.origKb} KB</span>
+                    </div>
+                    <div className="font-black text-emerald-600">
+                      ✓ Optimized: {fileStats.resizedKb} KB (Max {fileStats.width}px)
+                    </div>
+                  </div>
+                )}
 
-              {/* Next Button */}
-              <button
-                onClick={handleStep1Next}
-                disabled={loading}
-                className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
-              >
-                <span>{t('nextToStudio')}</span>
-                <ChevronRight className="w-6 h-6" />
-              </button>
+                {/* Next Button */}
+                <button
+                  onClick={handleStep1Next}
+                  disabled={loading}
+                  className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
+                >
+                  <span>{t('nextToStudio')}</span>
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -669,7 +860,7 @@ export default function AddProductWizard() {
           STEP 2: AI STUDIO (REKOGNITION TIPS, BG REMOVAL, LIGHTING FIX & 1:1)
           ===================================================================== */}
       {currentStep === 2 && (
-        <div className="space-y-5">
+        <div className="space-y-5 max-w-5xl mx-auto">
           <div className="text-center space-y-1">
             <h2 className="text-xl font-black text-slate-900 flex items-center justify-center space-x-2">
               <Sparkles className="w-6 h-6 text-saffron-600" />
@@ -680,103 +871,108 @@ export default function AddProductWizard() {
             </p>
           </div>
 
-          {/* Interactive Before/After Slider */}
-          {studioDataUrl && originalDataUrl && (
-            <BeforeAfterSlider
-              originalUrl={originalDataUrl}
-              enhancedUrl={studioDataUrl}
-              labelBefore="Original Photo"
-              labelAfter="Studio Enhanced"
-            />
-          )}
-
-          {/* Background removal progress indicator */}
-          {bgRemovalProgress && (
-            <div className="bg-amber-100 p-3 rounded-2xl border border-amber-300 text-xs font-bold text-amber-900 space-y-1">
-              <div className="flex justify-between">
-                <span>{bgRemovalProgress.note}</span>
-                <span>{bgRemovalProgress.percent}%</span>
-              </div>
-              <div className="w-full bg-white h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-amber-600 h-full rounded-full transition-all duration-200"
-                  style={{ width: `${bgRemovalProgress.percent}%` }}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Left: Interactive Before/After Slider & Progress */}
+            <div className="space-y-4">
+              {studioDataUrl && originalDataUrl && (
+                <BeforeAfterSlider
+                  originalUrl={originalDataUrl}
+                  enhancedUrl={studioDataUrl}
+                  labelBefore="Original Photo"
+                  labelAfter="Studio Enhanced"
                 />
-              </div>
-            </div>
-          )}
-
-          {/* Fallback notice if BG removal fell back to lighting-only */}
-          {fallbackNotice && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-semibold text-amber-800">
-              ℹ️ Original background kept with enhanced lighting fix applied.
-            </div>
-          )}
-
-          {/* 1:1 Studio Background Color Selector */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-            <div className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
-              <Palette className="w-4 h-4 text-saffron-600" />
-              <span>Choose 1:1 Studio Background:</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2.5 pt-1">
-              {[
-                { id: 'white', label: t('bgChoiceWhite'), bgClass: 'bg-white', borderClass: 'border-slate-300' },
-                { id: 'cream', label: t('bgChoiceCream'), bgClass: 'bg-[#FAF7EE]', borderClass: 'border-amber-200' },
-                { id: 'black', label: t('bgChoiceBlack'), bgClass: 'bg-[#18181B] text-white', borderClass: 'border-slate-800' },
-              ].map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => handleBgColorChange(b.id)}
-                  disabled={loading}
-                  className={`py-3 px-2 rounded-2xl border-2 text-xs font-black transition-all flex flex-col items-center justify-center space-y-1 ${b.bgClass} ${
-                    bgColor === b.id ? 'ring-3 ring-saffron-500 border-saffron-600 shadow-md scale-105' : b.borderClass
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded-full border ${bgColor === b.id ? 'bg-saffron-600' : 'bg-transparent'}`} />
-                  <span className={b.id === 'black' ? 'text-white' : 'text-slate-800'}>{b.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Rekognition Photo Quality Tips & Category */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                {t('photoQualityTips')}
-              </span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-800 border border-indigo-200">
-                {t('detectedCategory')}: {category}
-              </span>
-            </div>
-
-            <ul className="space-y-1.5 text-xs font-medium text-slate-700">
-              {enhanceTips.length > 0 ? (
-                enhanceTips.map((tip, idx) => (
-                  <li key={idx} className="flex items-start space-x-2">
-                    <span className="text-emerald-500 font-bold">✓</span>
-                    <span>{tip}</span>
-                  </li>
-                ))
-              ) : (
-                <li className="flex items-start space-x-2">
-                  <span className="text-emerald-500 font-bold">✓</span>
-                  <span>Lighting and craft details look clear and ready for digital cataloging.</span>
-                </li>
               )}
-            </ul>
-          </div>
 
-          {/* Next Button */}
-          <button
-            onClick={() => setCurrentStep(3)}
-            disabled={loading}
-            className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
-          >
-            <span>{t('nextToVoice')}</span>
-            <ChevronRight className="w-6 h-6" />
-          </button>
+              {bgRemovalProgress && (
+                <div className="bg-amber-100 p-3 rounded-2xl border border-amber-300 text-xs font-bold text-amber-900 space-y-1">
+                  <div className="flex justify-between">
+                    <span>{bgRemovalProgress.note}</span>
+                    <span>{bgRemovalProgress.percent}%</span>
+                  </div>
+                  <div className="w-full bg-white h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-amber-600 h-full rounded-full transition-all duration-200"
+                      style={{ width: `${bgRemovalProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {fallbackNotice && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-semibold text-amber-800">
+                  ℹ️ Original background kept with enhanced lighting fix applied.
+                </div>
+              )}
+            </div>
+
+            {/* Right: Studio Background & Quality Tips */}
+            <div className="space-y-4">
+              {/* 1:1 Studio Background Color Selector */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+                <div className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                  <Palette className="w-4 h-4 text-saffron-600" />
+                  <span>Choose 1:1 Studio Background:</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5 pt-1">
+                  {[
+                    { id: 'white', label: t('bgChoiceWhite'), bgClass: 'bg-white', borderClass: 'border-slate-300' },
+                    { id: 'cream', label: t('bgChoiceCream'), bgClass: 'bg-[#FAF7EE]', borderClass: 'border-amber-200' },
+                    { id: 'black', label: t('bgChoiceBlack'), bgClass: 'bg-[#18181B] text-white', borderClass: 'border-slate-800' },
+                  ].map((b) => (
+                    <button
+                      key={b.id}
+                      onClick={() => handleBgColorChange(b.id)}
+                      disabled={loading}
+                      className={`py-3 px-2 rounded-2xl border-2 text-xs font-black transition-all flex flex-col items-center justify-center space-y-1 ${b.bgClass} ${
+                        bgColor === b.id ? 'ring-3 ring-saffron-500 border-saffron-600 shadow-md scale-105' : b.borderClass
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full border ${bgColor === b.id ? 'bg-saffron-600' : 'bg-transparent'}`} />
+                      <span className={b.id === 'black' ? 'text-white' : 'text-slate-800'}>{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rekognition Photo Quality Tips & Category */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    {t('photoQualityTips')}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-800 border border-indigo-200">
+                    {t('detectedCategory')}: {category}
+                  </span>
+                </div>
+
+                <ul className="space-y-1.5 text-xs font-medium text-slate-700">
+                  {enhanceTips.length > 0 ? (
+                    enhanceTips.map((tip, idx) => (
+                      <li key={idx} className="flex items-start space-x-2">
+                        <span className="text-emerald-500 font-bold">✓</span>
+                        <span>{tip}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="flex items-start space-x-2">
+                      <span className="text-emerald-500 font-bold">✓</span>
+                      <span>Lighting and craft details look clear and ready for digital cataloging.</span>
+                    </li>
+                  )}
+                </ul>
+              </div>
+
+              {/* Next Button */}
+              <button
+                onClick={() => setCurrentStep(3)}
+                disabled={loading}
+                className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
+              >
+                <span>{t('nextToVoice')}</span>
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -784,112 +980,126 @@ export default function AddProductWizard() {
           STEP 3: VOICE STORY (WEB SPEECH API IN NATIVE INDIAN LOCALES)
           ===================================================================== */}
       {currentStep === 3 && (
-        <div className="space-y-5">
+        <div className="space-y-5 max-w-4xl mx-auto">
           <div className="text-center space-y-1">
-            <h2 className="text-xl font-black text-slate-900">
+            <h2 className="text-xl md:text-2xl font-black text-slate-900">
               {t('voicePrompt')}
             </h2>
-            <p className="text-xs text-saffron-700 font-bold">
+            <p className="text-xs md:text-sm text-saffron-700 font-bold">
               Speaking in: {currentLangObj.name} ({currentLangObj.bcp47})
             </p>
           </div>
 
-          {/* Big Circular Microphone Button */}
-          <div className="flex flex-col items-center justify-center py-6 space-y-4">
-            <button
-              onClick={toggleSpeechRecognition}
-              disabled={!speechSupported}
-              aria-label={isListening ? "Stop voice recording" : "Start speaking voice description"}
-              className={`w-32 h-32 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all active:scale-95 border-4 ${
-                isListening
-                  ? 'bg-red-600 border-red-300 animate-pulse ring-8 ring-red-200 text-white'
-                  : 'bg-saffron-600 border-saffron-400 text-white hover:bg-saffron-700'
-              }`}
-            >
-              {isListening ? (
-                <MicOff className="w-12 h-12 mb-1" />
-              ) : (
-                <Mic className="w-12 h-12 mb-1" />
-              )}
-              <span className="text-xs font-black">
-                {isListening ? 'Stop' : 'Speak'}
-              </span>
-            </button>
-
-            <div className="text-sm font-bold text-slate-700 text-center">
-              {isListening ? (
-                <span className="text-red-600 font-black flex items-center space-x-1">
-                  <span className="w-2 h-2 rounded-full bg-red-600 animate-ping inline-block" />
-                  <span>{t('micListening')}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Left Column: Big Circular Microphone Button */}
+            <div className="flex flex-col items-center justify-center py-8 px-4 space-y-4 bg-white/70 rounded-3xl border border-slate-200 shadow-sm">
+              <button
+                onClick={toggleSpeechRecognition}
+                disabled={!speechSupported}
+                aria-label={isListening ? "Stop voice recording" : "Start speaking voice description"}
+                className={`w-36 h-36 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all active:scale-95 border-4 ${
+                  isListening
+                    ? 'bg-red-600 border-red-300 animate-pulse ring-8 ring-red-200 text-white'
+                    : 'bg-saffron-600 border-saffron-400 text-white hover:bg-saffron-700'
+                }`}
+              >
+                {isListening ? (
+                  <MicOff className="w-14 h-14 mb-1" />
+                ) : (
+                  <Mic className="w-14 h-14 mb-1" />
+                )}
+                <span className="text-xs font-black">
+                  {isListening ? 'Stop' : 'Speak'}
                 </span>
-              ) : (
-                <span>{t('micStart')}</span>
-              )}
-            </div>
-          </div>
+              </button>
 
-          {/* Browser unsupported banner */}
-          {!speechSupported && (
-            <div className="p-3 bg-amber-100 border border-amber-300 rounded-2xl text-xs font-semibold text-amber-900">
-              {t('speechNotSupported')}
-            </div>
-          )}
+              <div className="text-sm font-bold text-slate-700 text-center">
+                {isListening ? (
+                  <span className="text-red-600 font-black flex items-center space-x-1">
+                    <span className="w-2 h-2 rounded-full bg-red-600 animate-ping inline-block" />
+                    <span>{t('micListening')}</span>
+                  </span>
+                ) : (
+                  <span>{t('micStart')}</span>
+                )}
+              </div>
 
-          {/* Spoken / Typed Transcript Text Area */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-600">
-                {t('transcriptLabel')}
-              </label>
-              {transcript && (
-                <button
-                  onClick={() => speak(transcript, true)}
-                  className="text-xs text-saffron-600 font-bold flex items-center space-x-1"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span>{t('readAloud')}</span>
-                </button>
+              {/* Browser unsupported banner */}
+              {!speechSupported && (
+                <div className="p-3 bg-amber-100 border border-amber-300 rounded-2xl text-xs font-semibold text-amber-900">
+                  {t('speechNotSupported')}
+                </div>
               )}
             </div>
 
-            <textarea
-              rows={4}
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="E.g., I made this silk dupatta using traditional natural indigo dye and hand block printing in 3 days..."
-              className="w-full p-3.5 rounded-2xl border border-slate-200 focus:border-saffron-500 focus:ring-2 focus:ring-saffron-200 text-sm font-medium outline-none resize-none"
-            />
+            {/* Right Column: Spoken / Typed Transcript Text Area */}
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600">
+                    {t('transcriptLabel')}
+                  </label>
+                  {transcript && (
+                    <button
+                      onClick={() => speak(transcript, true)}
+                      className="text-xs text-saffron-600 font-bold flex items-center space-x-1"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>{t('readAloud')}</span>
+                    </button>
+                  )}
+                </div>
 
-            {/* Quick Inspiration suggestions for artisans */}
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {[
-                'Pure mulberry silk',
-                'Terracotta clay',
-                'Handloom woven',
-                'Natural organic dyes',
-                'Solid brass bell',
-              ].map((phrase) => (
-                <button
-                  key={phrase}
-                  type="button"
-                  onClick={() => setTranscript((prev) => (prev ? `${prev}, ${phrase}` : phrase))}
-                  className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
-                >
-                  + {phrase}
-                </button>
-              ))}
+                <textarea
+                  rows={5}
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  placeholder="E.g., I made this silk dupatta using traditional natural indigo dye and hand block printing in 3 days..."
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 focus:border-saffron-500 focus:ring-2 focus:ring-saffron-200 text-sm font-medium outline-none resize-none"
+                />
+
+                {/* Quick Inspiration suggestions for artisans */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {(lang === 'mr' ? [
+                    'शुद्ध रेशम', 'मातीचे भांडे', 'हातमाग विणकाम', 'नैसर्गिक रंग', 'हस्तकला'
+                  ] : lang === 'hi' ? [
+                    'शुद्ध रेशम', 'मिट्टी का बर्तन', 'हथकरघा बुनाई', 'प्राकृतिक रंग', 'हस्तशिल्प'
+                  ] : lang === 'gu' ? [
+                    'શુદ્ધ રેશમ', 'માટીનું વાસણ', 'હાથવણાટ', 'કુદરતી રંગો', 'હસ્તકળા'
+                  ] : lang === 'ta' ? [
+                    'பட்டு நெசவு', 'களிமண் கைவினை', 'கைத்தறி', 'இயற்கை சாயம்', 'கைவினை'
+                  ] : lang === 'bn' ? [
+                    'খাঁটি রেশম', 'মাটির পাত্র', 'হাঁততাঁত', 'প্রাকৃতিক রঙ', 'হস্তশিল্প'
+                  ] : [
+                    'Pure mulberry silk',
+                    'Terracotta clay',
+                    'Handloom woven',
+                    'Natural organic dyes',
+                    'Solid brass bell',
+                  ]).map((phrase) => (
+                    <button
+                      key={phrase}
+                      type="button"
+                      onClick={() => setTranscript((prev) => (prev ? `${prev}, ${phrase}` : phrase))}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
+                    >
+                      + {phrase}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Next Button */}
+              <button
+                onClick={handleGenerateCatalog}
+                disabled={loading || !transcript.trim()}
+                className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 disabled:opacity-50 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
+              >
+                <span>{t('nextToCatalog')}</span>
+                <ChevronRight className="w-6 h-6" />
+              </button>
             </div>
           </div>
-
-          {/* Next Button */}
-          <button
-            onClick={handleGenerateCatalog}
-            disabled={loading || !transcript.trim()}
-            className="w-full min-h-[64px] bg-saffron-600 hover:bg-saffron-700 disabled:opacity-50 text-white font-black text-lg rounded-2xl shadow-xl shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
-          >
-            <span>{t('nextToCatalog')}</span>
-            <ChevronRight className="w-6 h-6" />
-          </button>
         </div>
       )}
 
@@ -897,9 +1107,9 @@ export default function AddProductWizard() {
           STEP 4: AI BILINGUAL CATALOG (ENGLISH & HINDI WITH EDIT & AUDIO)
           ===================================================================== */}
       {currentStep === 4 && catalog && (
-        <div className="space-y-5">
+        <div className="space-y-5 max-w-4xl mx-auto">
           <div className="text-center space-y-1">
-            <h2 className="text-xl font-black text-slate-900">
+            <h2 className="text-xl md:text-2xl font-black text-slate-900">
               {t('step4Title')}
             </h2>
             <p className="text-xs text-slate-500 font-semibold">
@@ -908,10 +1118,10 @@ export default function AddProductWizard() {
           </div>
 
           {/* Language View Selector */}
-          <div className="flex rounded-2xl bg-white p-1 border border-slate-200 shadow-sm">
+          <div className="flex rounded-2xl bg-white p-1 border border-slate-200 shadow-sm max-w-md mx-auto">
             {[
               { id: 'both', label: 'Bilingual (Both)' },
-              { id: 'hi', label: 'हिंदी' },
+              { id: 'regional', label: currentLangObj.label },
               { id: 'en', label: 'English' },
             ].map((v) => (
               <button
@@ -929,7 +1139,7 @@ export default function AddProductWizard() {
           </div>
 
           {/* Bilingual Catalog Card */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-md space-y-4">
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-md space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 Catalog Preview
@@ -946,41 +1156,45 @@ export default function AddProductWizard() {
             {/* Editable Mode */}
             {isEditingCatalog ? (
               <div className="space-y-3 pt-2">
-                <div>
-                  <label className="text-xs font-bold text-slate-700">English Title</label>
-                  <input
-                    type="text"
-                    value={editTitleEn}
-                    onChange={(e) => setEditTitleEn(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm font-semibold"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">English Title</label>
+                    <input
+                      type="text"
+                      value={editTitleEn}
+                      onChange={(e) => setEditTitleEn(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">{currentLangObj.label} Title</label>
+                    <input
+                      type="text"
+                      value={editTitleHi}
+                      onChange={(e) => setEditTitleHi(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm font-semibold"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700">हिंदी शीर्षक</label>
-                  <input
-                    type="text"
-                    value={editTitleHi}
-                    onChange={(e) => setEditTitleHi(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700">English Story</label>
-                  <textarea
-                    rows={3}
-                    value={editDescEn}
-                    onChange={(e) => setEditDescEn(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700">हिंदी विवरण</label>
-                  <textarea
-                    rows={3}
-                    value={editDescHi}
-                    onChange={(e) => setEditDescHi(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-medium"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">English Story</label>
+                    <textarea
+                      rows={4}
+                      value={editDescEn}
+                      onChange={(e) => setEditDescEn(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">{currentLangObj.label} {t('step4Title')}</label>
+                    <textarea
+                      rows={4}
+                      value={editDescHi}
+                      onChange={(e) => setEditDescHi(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-medium"
+                    />
+                  </div>
                 </div>
                 <button
                   onClick={saveCatalogEdits}
@@ -991,12 +1205,12 @@ export default function AddProductWizard() {
               </div>
             ) : (
               /* Display Mode */
-              <div className="space-y-4">
+              <div className={catalogLanguageView === 'both' ? 'grid grid-cols-1 md:grid-cols-2 gap-6' : 'space-y-4'}>
                 {/* English Content */}
                 {(catalogLanguageView === 'both' || catalogLanguageView === 'en') && (
-                  <div className="space-y-1.5 border-b border-slate-100 pb-3">
+                  <div className="space-y-2 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
                         English Copy
                       </span>
                       <button
@@ -1016,26 +1230,26 @@ export default function AddProductWizard() {
                   </div>
                 )}
 
-                {/* Hindi Content */}
-                {(catalogLanguageView === 'both' || catalogLanguageView === 'hi') && (
-                  <div className="space-y-1.5 pt-1">
+                {/* Regional Language Content */}
+                {(catalogLanguageView === 'both' || catalogLanguageView === 'regional' || catalogLanguageView === 'hi') && (
+                  <div className="space-y-2 bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
-                        हिंदी विवरण
+                      <span className="text-[10px] font-black uppercase text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        {currentLangObj.label} {t('step4Title')}
                       </span>
                       <button
-                        onClick={() => speak(catalog.description_hi, true)}
+                        onClick={() => speak(catalog.description_regional || catalog.description_hi, true)}
                         className="text-xs text-slate-400 hover:text-slate-700"
-                        title="सुनें"
+                        title={t('readAloud')}
                       >
                         <Volume2 className="w-4 h-4" />
                       </button>
                     </div>
                     <h3 className="text-lg font-black text-slate-900 leading-tight">
-                      {catalog.title_hi}
+                      {catalog.title_regional || catalog.title_hi}
                     </h3>
                     <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                      {catalog.description_hi}
+                      {catalog.description_regional || catalog.description_hi}
                     </p>
                   </div>
                 )}
@@ -1077,9 +1291,9 @@ export default function AddProductWizard() {
           STEP 5: FAIR-TRADE PRICE ASSISTANT (GAUGE, BREAKDOWN & SAVE)
           ===================================================================== */}
       {currentStep === 5 && (
-        <div className="space-y-5">
+        <div className="space-y-5 max-w-5xl mx-auto">
           <div className="text-center space-y-1">
-            <h2 className="text-xl font-black text-slate-900 flex items-center justify-center space-x-2">
+            <h2 className="text-xl md:text-2xl font-black text-slate-900 flex items-center justify-center space-x-2">
               <DollarSign className="w-6 h-6 text-emerald-600" />
               <span>{t('priceAssistantTitle')}</span>
             </h2>
@@ -1088,163 +1302,181 @@ export default function AddProductWizard() {
             </p>
           </div>
 
-          {/* Inputs for Cost, Labor Hours & Quantity */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  {t('materialCostLabel')}
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-3 text-slate-400 font-bold">₹</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Left Column: Cost, Labor & Final Price Controls */}
+            <div className="space-y-5">
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      {t('materialCostLabel')}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-3 text-slate-400 font-bold">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={materialCost}
+                        onChange={(e) => setMaterialCost(e.target.value)}
+                        className="w-full pl-8 pr-3 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      {t('hoursWorkedLabel')}
+                    </label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={hoursWorked}
+                      onChange={(e) => setHoursWorked(e.target.value)}
+                      className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    {t('quantityLabel')}
+                  </label>
                   <input
                     type="number"
-                    min="0"
-                    value={materialCost}
-                    onChange={(e) => setMaterialCost(e.target.value)}
-                    className="w-full pl-8 pr-3 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
+                  />
+                </div>
+
+                <button
+                  onClick={handleCalculatePrice}
+                  disabled={loading}
+                  className="w-full py-3.5 bg-saffron-600 hover:bg-saffron-700 text-white font-black text-sm rounded-2xl shadow-sm active:scale-95 transition-all"
+                >
+                  {t('calculatePriceBtn')}
+                </button>
+              </div>
+
+              {/* Final Price Input with manual override */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-2">
+                <label className="text-xs font-bold text-slate-700 block">
+                  {t('customPriceLabel')}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-3 text-slate-400 font-bold text-xl">₹</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={chosenPrice}
+                    onChange={(e) => setChosenPrice(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-2xl border-2 border-saffron-500 text-2xl font-black text-slate-900 focus:ring-4 focus:ring-saffron-200 outline-none"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  {t('hoursWorkedLabel')}
-                </label>
-                <input
-                  type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={hoursWorked}
-                  onChange={(e) => setHoursWorked(e.target.value)}
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
-                {t('quantityLabel')}
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-lg font-black focus:border-saffron-500 outline-none"
-              />
-            </div>
-
-            <button
-              onClick={handleCalculatePrice}
-              disabled={loading}
-              className="w-full py-3.5 bg-indigo-900 hover:bg-indigo-950 text-white font-black text-sm rounded-2xl shadow-md active:scale-95 transition-all"
-            >
-              {t('calculatePriceBtn')}
-            </button>
-          </div>
-
-          {/* Price Spectrum & Recommendation Card */}
-          {priceRecommendation && (
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-5 rounded-3xl border-2 border-amber-300 shadow-md space-y-4">
-              <div className="text-center space-y-1">
-                <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider">
-                  {t('priceGaugeSuggested')}
-                </span>
-                <div className="text-4xl font-black text-saffron-700">
-                  ₹{priceRecommendation.suggested_price}
-                </div>
-              </div>
-
-              {/* Visual 3-tier Price Gauge */}
-              <div className="grid grid-cols-3 gap-2 text-center pt-1">
-                <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">
-                    {t('priceGaugeMin')}
-                  </div>
-                  <div className="text-base font-black text-slate-700">
-                    ₹{priceRecommendation.min_price}
-                  </div>
-                </div>
-
-                <div className="bg-emerald-600 text-white p-2.5 rounded-2xl shadow-md ring-2 ring-emerald-300">
-                  <div className="text-[10px] font-bold uppercase">
-                    Suggested
-                  </div>
-                  <div className="text-lg font-black">
-                    ₹{priceRecommendation.suggested_price}
-                  </div>
-                </div>
-
-                <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">
-                    {t('priceGaugeMax')}
-                  </div>
-                  <div className="text-base font-black text-slate-700">
-                    ₹{priceRecommendation.max_price}
-                  </div>
-                </div>
-              </div>
-
-              {/* Fair Breakdown Card */}
-              {priceRecommendation.breakdown && (
-                <div className="bg-white/80 p-3.5 rounded-2xl text-xs space-y-1.5 border border-amber-200">
-                  <div className="flex justify-between font-semibold text-slate-600">
-                    <span>{t('materialCostLabel')}:</span>
-                    <span>₹{priceRecommendation.breakdown.material}</span>
-                  </div>
-                  <div className="flex justify-between font-semibold text-slate-600">
-                    <span>Artisan Wage (₹100/hr):</span>
-                    <span>₹{priceRecommendation.breakdown.labour}</span>
-                  </div>
-                  <div className="flex justify-between font-black text-emerald-700 border-t border-slate-100 pt-1">
-                    <span>Artisan Profit Margin:</span>
-                    <span>₹{priceRecommendation.breakdown.margin}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Reasoning in user language */}
-              <p className="text-xs text-amber-900 font-medium leading-relaxed italic">
-                "{lang === 'hi' ? priceRecommendation.reasoning_hi : priceRecommendation.reasoning_en}"
-              </p>
-
-              {/* Use this price shortcut */}
+              {/* Save Product Button */}
               <button
-                onClick={() => setChosenPrice(String(priceRecommendation.suggested_price))}
-                className="w-full py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow"
+                onClick={handleSaveProduct}
+                disabled={loading || !chosenPrice}
+                className="w-full min-h-[64px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-lg rounded-2xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition-all"
               >
-                ✓ {t('useThisPrice')} (₹{priceRecommendation.suggested_price})
+                <Check className="w-6 h-6" />
+                <span>{t('saveProductBtn')}</span>
               </button>
             </div>
-          )}
 
-          {/* Final Price Input with manual override */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-            <label className="text-xs font-bold text-slate-700 block">
-              {t('customPriceLabel')}
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-3 text-slate-400 font-bold text-xl">₹</span>
-              <input
-                type="number"
-                min="1"
-                value={chosenPrice}
-                onChange={(e) => setChosenPrice(e.target.value)}
-                className="w-full pl-10 pr-4 py-3.5 rounded-2xl border-2 border-saffron-500 text-2xl font-black text-slate-900 focus:ring-4 focus:ring-saffron-200 outline-none"
-              />
+            {/* Right Column: Price Spectrum & Recommendation Card */}
+            <div>
+              {priceRecommendation ? (
+                <div className="bg-white p-6 rounded-3xl border border-amber-200/90 shadow-sm space-y-4">
+                  <div className="text-center space-y-1">
+                    <span className="text-[10px] font-black uppercase text-saffron-700 tracking-wider">
+                      {t('priceGaugeSuggested')}
+                    </span>
+                    <div className="text-4xl font-black text-saffron-700">
+                      ₹{priceRecommendation.suggested_price}
+                    </div>
+                  </div>
+
+                  {/* Visual 3-tier Price Gauge */}
+                  <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">
+                        {t('priceGaugeMin')}
+                      </div>
+                      <div className="text-base font-black text-slate-700">
+                        ₹{priceRecommendation.min_price}
+                      </div>
+                    </div>
+
+                    <div className="bg-emerald-700 text-white p-2.5 rounded-2xl shadow-sm ring-2 ring-emerald-200">
+                      <div className="text-[10px] font-bold uppercase">
+                        Suggested
+                      </div>
+                      <div className="text-lg font-black">
+                        ₹{priceRecommendation.suggested_price}
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">
+                        {t('priceGaugeMax')}
+                      </div>
+                      <div className="text-base font-black text-slate-700">
+                        ₹{priceRecommendation.max_price}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Fair Breakdown Card */}
+                  {priceRecommendation.breakdown && (
+                    <div className="bg-amber-50/50 p-3.5 rounded-2xl text-xs space-y-1.5 border border-amber-200">
+                      <div className="flex justify-between font-semibold text-slate-600">
+                        <span>{t('materialCostLabel')}:</span>
+                        <span>₹{priceRecommendation.breakdown.material}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold text-slate-600">
+                        <span>Artisan Wage (₹100/hr):</span>
+                        <span>₹{priceRecommendation.breakdown.labour}</span>
+                      </div>
+                      <div className="flex justify-between font-black text-emerald-800 border-t border-amber-200/60 pt-1">
+                        <span>Artisan Profit Margin:</span>
+                        <span>₹{priceRecommendation.breakdown.margin}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reasoning in user language */}
+                  <p className="text-xs text-slate-700 font-medium leading-relaxed italic">
+                    "{lang === 'hi' ? priceRecommendation.reasoning_hi : priceRecommendation.reasoning_en}"
+                  </p>
+
+                  {/* Use this price shortcut */}
+                  <button
+                    onClick={() => setChosenPrice(String(priceRecommendation.suggested_price))}
+                    className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-sm"
+                  >
+                    ✓ {t('useThisPrice')} (₹{priceRecommendation.suggested_price})
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white/70 p-8 rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+                    <DollarSign className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-700">
+                    Enter details & tap Calculate Price
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    Kaarigar AI will compute fair market rates, artisan living wage, and benchmarked tiers automatically.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Save Product Button */}
-          <button
-            onClick={handleSaveProduct}
-            disabled={loading || !chosenPrice}
-            className="w-full min-h-[64px] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-lg rounded-2xl shadow-xl shadow-emerald-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
-          >
-            <Check className="w-6 h-6" />
-            <span>{t('saveProductBtn')}</span>
-          </button>
         </div>
       )}
 
@@ -1252,7 +1484,7 @@ export default function AddProductWizard() {
           STEP 6: CELEBRATORY SUCCESS SCREEN
           ===================================================================== */}
       {currentStep === 6 && savedProduct && (
-        <div className="space-y-6 pt-4 text-center">
+        <div className="space-y-6 pt-4 text-center max-w-xl mx-auto">
           <div className="w-20 h-20 rounded-full bg-emerald-100 border-4 border-emerald-500 flex items-center justify-center mx-auto text-emerald-600 shadow-xl">
             <Check className="w-10 h-10 stroke-[3]" />
           </div>
@@ -1285,28 +1517,28 @@ export default function AddProductWizard() {
           </div>
 
           {/* Primary Action Buttons */}
-          <div className="space-y-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
             <button
               onClick={handleShareWhatsApp}
-              className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-base rounded-2xl shadow-lg shadow-emerald-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
+              className="w-full py-3.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm rounded-2xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition-all"
             >
-              <Share2 className="w-5 h-5" />
+              <Share2 className="w-4 h-4" />
               <span>{t('shareOnWhatsApp')}</span>
             </button>
 
             <button
               onClick={handleResetWizard}
-              className="w-full py-4 bg-saffron-600 hover:bg-saffron-700 text-white font-black text-base rounded-2xl shadow-lg shadow-saffron-600/25 flex items-center justify-center space-x-2 active:scale-95 transition-all"
+              className="w-full py-3.5 bg-saffron-600 hover:bg-saffron-700 text-white font-bold text-sm rounded-2xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition-all"
             >
-              <PlusCircle className="w-5 h-5" />
+              <PlusCircle className="w-4 h-4" />
               <span>{t('addAnother')}</span>
             </button>
 
             <button
               onClick={() => navigate('/my-shop')}
-              className="w-full py-4 bg-indigo-900 hover:bg-indigo-950 text-white font-black text-base rounded-2xl shadow-md flex items-center justify-center space-x-2 active:scale-95 transition-all"
+              className="w-full py-3.5 bg-white hover:bg-amber-50 border border-amber-200 text-slate-800 font-bold text-sm rounded-2xl shadow-sm flex items-center justify-center space-x-2 active:scale-95 transition-all"
             >
-              <Store className="w-5 h-5" />
+              <Store className="w-4 h-4 text-slate-600" />
               <span>{t('goToMyShop')}</span>
             </button>
           </div>

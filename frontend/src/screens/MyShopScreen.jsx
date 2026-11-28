@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getProducts, deleteProduct } from '../api';
 import { ArrowLeft, Trash2, Plus, Volume2, Share2, ExternalLink } from 'lucide-react';
+import { playProductAudio } from '../i18n';
 
 export default function MyShopScreen() {
   const { t, speak, lang } = useLanguage();
@@ -23,15 +24,21 @@ export default function MyShopScreen() {
       const res = await getProducts();
       setProducts(res.products || []);
     } catch (err) {
-      alert('Failed to load products: ' + err.message);
+      console.warn('Failed to load products:', err);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadProducts();
-  }, []);
+    setProducts([]);
+    if (user?.sub || user?.userId) {
+      loadProducts();
+    } else {
+      setLoading(false);
+    }
+  }, [user?.sub]);
 
   const handleDelete = async (productId, title) => {
     if (!window.confirm(`Are you sure you want to delete "${title}" from your shop?`)) return;
@@ -48,7 +55,7 @@ export default function MyShopScreen() {
 
   const handleShareShopWhatsApp = () => {
     const text = encodeURIComponent(
-      `Namaste! Visit my KalaMitra artisan shop to see my latest handcrafted creations: ${publicShopUrl}`
+      `Namaste! Visit my Kaarigar artisan shop to see my latest handcrafted creations: ${publicShopUrl}`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
   };
@@ -100,7 +107,7 @@ export default function MyShopScreen() {
           <button
             onClick={handleShareShopWhatsApp}
             aria-label="Share public storefront on WhatsApp"
-            className="min-h-[44px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1"
+            className="min-h-[44px] px-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center space-x-1"
             title="Share on WhatsApp"
           >
             <Share2 className="w-4 h-4" />
@@ -124,13 +131,13 @@ export default function MyShopScreen() {
 
       {/* Empty state */}
       {!loading && products.length === 0 && (
-        <div className="text-center py-16 px-4 bg-white rounded-3xl border-2 border-dashed border-amber-200">
+        <div className="text-center py-16 px-4 bg-white rounded-3xl border border-amber-200">
           <span className="text-5xl block mb-3">🧺</span>
           <h2 className="text-lg font-bold text-slate-800 mb-1">Your shop is empty</h2>
           <p className="text-sm text-slate-500 mb-6">Add your first handcrafted creation now.</p>
           <button
             onClick={() => navigate('/add-product')}
-            className="px-6 py-3.5 bg-saffron-600 text-white font-bold rounded-2xl shadow-md inline-flex items-center space-x-2"
+            className="px-6 py-3.5 bg-saffron-600 hover:bg-saffron-700 text-white font-bold rounded-2xl shadow-sm inline-flex items-center space-x-2"
           >
             <Plus className="w-5 h-5" />
             <span>{t('btnBigAddProduct')}</span>
@@ -139,15 +146,19 @@ export default function MyShopScreen() {
       )}
 
       {/* Products list */}
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {products.map((p) => {
-          const displayTitle = lang === 'en' ? (p.title_en || p.title_hi) : (p.title_hi || p.title_en);
-          const displayDesc = lang === 'en' ? (p.description_en || p.description_hi) : (p.description_hi || p.description_en);
+          const displayTitle = lang === 'en'
+            ? (p.title_en || p.title_hi)
+            : (p['title_' + lang] || p.title_regional || p.title_hi || p.title_en);
+          const displayDesc = lang === 'en'
+            ? (p.description_en || p.description_hi)
+            : (p['description_' + lang] || p.description_regional || p.description_hi || p.description_en);
 
           return (
             <div
               key={p.productId}
-              className="bg-white rounded-3xl border border-slate-200/80 shadow-md overflow-hidden"
+              className="bg-white rounded-3xl border border-slate-200/80 shadow-md hover:shadow-xl transition-all overflow-hidden flex flex-col justify-between"
             >
               <div className="relative h-48 bg-slate-100">
                 <img
@@ -176,7 +187,12 @@ export default function MyShopScreen() {
                   </div>
 
                   <button
-                    onClick={() => speak(`${displayTitle}. Price: ${p.price} rupees. ${displayDesc}`, true)}
+                    onClick={() => {
+                      const played = playProductAudio(p.productId, lang);
+                      if (!played) {
+                        speak(`${displayTitle}. ${t('price')}: ${p.price}. ${displayDesc}`, true);
+                      }
+                    }}
                     aria-label={t('readAloud') || "Read product details aloud"}
                     className="w-11 h-11 rounded-full bg-amber-50 text-amber-800 hover:bg-amber-100 flex items-center justify-center shrink-0"
                     title={t('readAloud')}

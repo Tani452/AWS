@@ -22,11 +22,35 @@
   }
 }
 
-/* Custom mobile card container with 200% zoom fluidity */
+/* Responsive container: mobile-first, fluid and expansive on tablets & laptops */
 .mobile-container {
-  max-width: 480px;
   width: 100%;
+  max-width: 100%;
   margin-left: auto;
   margin-right: auto;
-  min-height: 100vh;
+  min-height: calc(100vh - 70px);
+}
+
+@media (min-width: 640px) {
+  .mobile-container {
+    max-width: 640px;
+  }
+}
+
+@media (min-width: 768px) {
+  .mobile-container {
+    max-width: 768px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .mobile-container {
+    max-width: 1080px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .mobile-container {
+    max-width: 1280px;
+  }
 }

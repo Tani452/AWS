@@ -62,8 +62,8 @@ def get_gemini_api_key(force_refresh: bool = False) -> str:
         ssm = boto3.client("ssm", region_name=region_name)
         response = ssm.get_parameter(Name=param_name, WithDecryption=True)
         key_value = response.get("Parameter", {}).get("Value")
-        if not key_value or not key_value.strip():
-            raise AIError("AI service configuration error: Empty API key in Parameter Store.")
+        if not key_value or not key_value.strip() or "PASTE_KEY_HERE" in key_value or key_value.strip().startswith("aws ssm"):
+            raise AIError("AI service configuration error: Empty or placeholder API key in Parameter Store.")
         _CACHED_GEMINI_KEY = key_value.strip()
         return _CACHED_GEMINI_KEY
     except ClientError as e:

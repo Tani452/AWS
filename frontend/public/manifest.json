@@ -1,12 +1,12 @@
 {
-  "name": "KalaMitra - कला मित्र",
-  "short_name": "KalaMitra",
+  "name": "Kaarigar - कारीगर",
+  "short_name": "Kaarigar",
   "description": "AI Virtual Business Manager for Bharat Artisans",
   "start_url": "./#/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#fffbeb",
-  "theme_color": "#ea580c",
+  "background_color": "#FAF7F2",
+  "theme_color": "#A84B2C",
   "icons": [
     {
       "src": "/icon.svg",

@@ -96,23 +96,56 @@ function saveMockProducts(products) {
   localStorage.setItem(MOCK_STORAGE_KEY_PRODUCTS, JSON.stringify(products));
 }
 
+// Clear any legacy mock user on startup to prevent session confusion
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(MOCK_STORAGE_KEY_USER);
+  } catch {}
+}
+
 // =============================================================================
 // AUTHENTICATION METHODS
 // =============================================================================
 export async function apiLogin(email, password) {
-  if (isMock) {
-    const mockUser = { userId: 'mock-artisan-101', email, username: email.split('@')[0] };
-    localStorage.setItem(MOCK_STORAGE_KEY_USER, JSON.stringify(mockUser));
-    return mockUser;
+  // Always sign out any previous session first so no account data leaks between artisans
+  try {
+    await amplifySignOut({ global: false }).catch(() => {});
+  } catch {}
+
+  let result;
+  try {
+    result = await amplifySignIn({ username: email, password });
+  } catch (err) {
+    if (err.message && /already.*signed.*in/i.test(err.message)) {
+      await amplifySignOut({ global: false }).catch(() => {});
+      result = await amplifySignIn({ username: email, password });
+    } else {
+      throw err;
+    }
   }
-  const result = await amplifySignIn({ username: email, password });
-  return result;
+
+  if (!result.isSignedIn) {
+    if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP_STEP') {
+      throw new Error('Account unconfirmed. Please enter your verification code.');
+    }
+    throw new Error(`Sign in not complete: ${result.nextStep?.signInStep || 'Action required'}.`);
+  }
+
+  const session = await fetchAuthSession();
+  const user = await amplifyGetCurrentUser();
+  return {
+    ...user,
+    email: user.signInDetails?.loginId || user.username || email,
+    sub: session.tokens?.idToken?.payload?.sub,
+  };
 }
 
 export async function apiSignUp(email, password) {
-  if (isMock) {
-    return { isSignUpComplete: false, nextStep: { signUpStep: 'CONFIRM_SIGN_UP_STEP' } };
-  }
+  // Clear any existing session before new sign-up
+  try {
+    await amplifySignOut({ global: false }).catch(() => {});
+  } catch {}
+
   return await amplifySignUp({
     username: email,
     password,
@@ -121,32 +154,30 @@ export async function apiSignUp(email, password) {
 }
 
 export async function apiConfirmSignUp(email, code) {
-  if (isMock) {
-    const mockUser = { userId: 'mock-artisan-101', email, username: email.split('@')[0] };
-    localStorage.setItem(MOCK_STORAGE_KEY_USER, JSON.stringify(mockUser));
-    return mockUser;
-  }
   return await amplifyConfirmSignUp({ username: email, confirmationCode: code });
 }
 
 export async function apiSignOut() {
-  if (isMock) {
-    localStorage.removeItem(MOCK_STORAGE_KEY_USER);
-    return;
+  try {
+    await amplifySignOut({ global: false });
+  } catch (err) {
+    console.warn('Sign out warning:', err);
   }
-  return await amplifySignOut();
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(MOCK_STORAGE_KEY_USER);
+  }
 }
 
 export async function apiGetCurrentUser() {
-  if (isMock) {
-    const data = localStorage.getItem(MOCK_STORAGE_KEY_USER);
-    return data ? JSON.parse(data) : null;
-  }
   try {
     const session = await fetchAuthSession();
     if (!session.tokens?.idToken) return null;
     const user = await amplifyGetCurrentUser();
-    return { ...user, sub: session.tokens.idToken.payload.sub };
+    return {
+      ...user,
+      email: user.signInDetails?.loginId || user.username,
+      sub: session.tokens.idToken.payload.sub,
+    };
   } catch {
     return null;
   }
@@ -174,12 +205,20 @@ async function request(endpoint, options = {}) {
   }
 
   const headers = await getAuthHeaders();
+  if (!isMock && !headers.Authorization && !endpoint.startsWith('/shop')) {
+    throw new Error('Your session has expired. Please log in again to continue.');
+  }
+
   const url = `${API_URL}${endpoint}`;
 
   const res = await fetch(url, {
     ...options,
     headers: { ...headers, ...(options.headers || {}) },
   });
+
+  if (res.status === 401) {
+    throw new Error('Your session has expired or you are not signed in. Please log in again.');
+  }
 
   if (res.status === 429) {
     throw new Error('DAILY_LIMIT_EXCEEDED: Daily AI limit reached (20 actions per day). Please try again tomorrow.');
@@ -382,7 +421,19 @@ export async function getStats() {
     const products = getMockProducts();
     return {
       productsCount: products.length,
-      enquiriesCount: 8,
+      enquiriesCount: 1,
+      enquiries: [
+        {
+          enquiryId: 'mock-enq-1',
+          productId: products[0]?.productId || 'mock-prod-1',
+          buyerName: 'Ramesh Patel',
+          buyerContact: '9876563210',
+          message: 'Make it in red theme. Can you deliver to Jaipur by Friday?',
+          quantity: 2,
+          createdAt: new Date().toISOString(),
+          status: 'new',
+        },
+      ],
       estimatedMinutesSaved: products.length * 15,
       isEstimate: true,
       note: 'Based on 15 mins saved per product cataloged',
@@ -408,14 +459,17 @@ export async function exportCatalogCsv() {
         p.imageUrl || '',
       ]),
     ];
-    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvRows = rows.map((e) => e.map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    // Prefix with UTF-8 BOM so Excel on Windows properly displays Hindi and regional characters
+    const blob = new Blob(['\ufeff' + csvRows], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `kalamitra_catalog_export.csv`);
+    link.href = url;
+    link.download = `kaarigar_catalog_export.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
     return { ok: true };
   }
 
@@ -423,13 +477,30 @@ export async function exportCatalogCsv() {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/export.csv`, { method: 'GET', headers });
   if (!res.ok) throw new Error('Failed to export catalog CSV');
-  const blob = await res.blob();
+  const text = await res.text();
+  // Ensure UTF-8 BOM is present so Microsoft Excel on Windows parses Hindi / regional scripts crisply
+  const csvContent = text.startsWith('\ufeff') ? text : '\ufeff' + text;
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'kalamitra_catalog.csv';
+  a.download = 'kaarigar_catalog_export.csv';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
   return { ok: true };
+}
+
+/**
+ * Synthesizes dynamic text into natural regional audio using server-side neural TTS.
+ */
+export async function getSynthesizedAudio(text, language = 'hi') {
+  if (isMock) {
+    return { audioDataUrl: null };
+  }
+  return request('/tts', {
+    method: 'POST',
+    body: JSON.stringify({ text, language }),
+  });
 }
